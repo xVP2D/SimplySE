@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { api } from "../lib/api";
+import { randomUUID } from "../lib/uuid";
 
 type RuleKind = "set_mode" | "set_boolean" | "chcon";
 
@@ -27,7 +28,7 @@ export function DeployRuleDialog({
   // attempt's outcome ambiguous), but regenerated as soon as they change
   // any field — that's a genuinely different request.
   const idempotencyKey = useMemo(
-    () => crypto.randomUUID(),
+    () => randomUUID(),
     [kind, mode, boolName, boolValue, chconPath, chconType, chconRecursive, agentIds.join(",")],
   );
 

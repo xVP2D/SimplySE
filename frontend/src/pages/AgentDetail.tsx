@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, type Agent, type AvcEventHit, type Command } from "../lib/api";
 import { DeployRuleDialog } from "../components/DeployRuleDialog";
 import { formatPayload, statusTagClass } from "../lib/commandFormat";
+import { randomUUID } from "../lib/uuid";
 
 export function AgentDetail() {
   const { id } = useParams<{ id: string }>();
@@ -45,7 +46,7 @@ export function AgentDetail() {
     try {
       await api.deployRule(
         { name: `Passer en ${mode}`, type: "set_mode", payload_json: JSON.stringify({ mode }), agent_ids: [agent.id] },
-        crypto.randomUUID(),
+        randomUUID(),
       );
       await load();
     } catch (err) {
