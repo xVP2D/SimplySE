@@ -162,11 +162,33 @@ ensure_docker() {
     log "docker + compose plugin already present: $(docker --version)"
     return
   fi
-  if ! confirm "Docker was not found. Install it via the official get.docker.com script?" 1; then
+  if ! confirm "Docker was not found. Install it now?" 1; then
     die "Docker is required to run the bundled Postgres/OpenSearch/NATS stack. Install it yourself and re-run, or point POSTGRES_DSN/OPENSEARCH_URL/NATS_URL at infra you already have."
   fi
-  log "installing Docker via get.docker.com"
-  curl -fsSL https://get.docker.com | $SUDO sh
+
+  # get.docker.com's own distro detection doesn't always recognize RHEL
+  # rebuilds (AlmaLinux, Rocky, ...) even though the docker-ce package
+  # itself installs fine there — so on dnf/yum we go straight to Docker's
+  # documented CentOS-repo install instead of depending on that script's
+  # distro whitelist. https://docs.docker.com/engine/install/centos/
+  case "$PKG_MANAGER" in
+    dnf|yum)
+      log "installing Docker CE via Docker's centos dnf/yum repo (works on RHEL-family rebuilds too)"
+      if command -v dnf >/dev/null 2>&1; then
+        $SUDO dnf -y install dnf-plugins-core
+        $SUDO dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+        $SUDO dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      else
+        $SUDO yum -y install yum-utils
+        $SUDO yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+        $SUDO yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      fi
+      ;;
+    *)
+      log "installing Docker via get.docker.com"
+      curl -fsSL https://get.docker.com | $SUDO sh
+      ;;
+  esac
   $SUDO systemctl enable --now docker
 }
 ensure_docker
