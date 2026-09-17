@@ -82,8 +82,26 @@ fn recv_loop(fd: RawFd, tx: Sender<String>) {
         // SAFETY: buf is a valid, appropriately-sized buffer for the
         // duration of the call; recv(2) never writes more than buf.len().
         let n = unsafe { libc::recv(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0) };
-        if n <= 0 {
-            tracing::warn!(error = %io::Error::last_os_error(), "audit netlink recv failed, stopping netlink collector");
+        if n < 0 {
+            let err = io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::ENOBUFS) {
+                // The kernel dropped a batch of messages because this
+                // socket's receive buffer overflowed (bursty audit
+                // traffic) — recoverable, and specific to *this* read:
+                // the socket itself is still valid, so keep reading
+                // rather than tearing down the whole collector (which
+                // otherwise silently kills AVC/inventory reporting for
+                // the rest of the process's life, with no retry).
+                // Confirmed live: this is exactly what took an agent's
+                // collector down permanently on a busy host.
+                tracing::warn!("audit netlink recv overflowed (ENOBUFS), some AVC records were dropped — continuing");
+                continue;
+            }
+            tracing::warn!(error = %err, "audit netlink recv failed, stopping netlink collector");
+            break;
+        }
+        if n == 0 {
+            tracing::warn!("audit netlink socket closed, stopping netlink collector");
             break;
         }
 
