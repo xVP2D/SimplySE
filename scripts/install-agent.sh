@@ -213,6 +213,33 @@ $SUDO chown -R "$(id -u):$(id -g)" "$INSTALL_DIR"
 log "building agent in release mode (this can take a few minutes the first time)"
 (cd "$INSTALL_DIR/agent" && cargo build --release)
 
+# cargo, like `go build`, compiles into a temp file and renames it into
+# place — a rename preserves the temp file's SELinux label instead of
+# inheriting the destination directory's, so the binary can come out
+# labeled as a generic temp type (e.g. user_tmp_t) rather than an
+# executable type. systemd runs services from the init_t domain, which
+# has no rule to execute that type without a domain transition: denied,
+# and dontaudit'd in the shipped policy, so it never shows up in
+# ausearch/journalctl — systemd just reports a bare 203/EXEC, identical
+# to a DAC problem from the log alone (see install-master.sh's history
+# for how this was actually diagnosed on this same class of host).
+AGENT_BIN="$INSTALL_DIR/agent/target/release/selinux-agent"
+if command -v getenforce >/dev/null 2>&1 && [[ "$(getenforce)" != "Disabled" ]]; then
+  log "SELinux is active: relabeling the agent binary as bin_t so systemd (running as init_t) is allowed to execute it"
+  if ! command -v semanage >/dev/null 2>&1; then
+    case "$PKG_MANAGER" in
+      dnf) $SUDO dnf install -y policycoreutils-python-utils ;;
+      yum) $SUDO yum install -y policycoreutils-python-utils ;;
+      zypper) $SUDO zypper --non-interactive install policycoreutils-python-utils ;;
+      *) warn "SELinux is active but 'semanage' isn't available and couldn't be auto-installed on this distro; the agent binary may fail to start with a bare 203/EXEC. Install policycoreutils-python-utils (or equivalent) and run: semanage fcontext -a -t bin_t '${AGENT_BIN}' && restorecon -v '${AGENT_BIN}'" ;;
+    esac
+  fi
+  if command -v semanage >/dev/null 2>&1; then
+    $SUDO semanage fcontext -a -t bin_t "${AGENT_BIN}" 2>/dev/null || true
+    $SUDO restorecon -v "${AGENT_BIN}" 2>/dev/null || true
+  fi
+fi
+
 $SUDO mkdir -p /var/lib/selinux-fleet-manager /etc/selinux-fleet-manager
 $SUDO tee /etc/selinux-fleet-manager/agent.env >/dev/null <<EOF
 MASTER_ADDR=${MASTER_ADDR}
