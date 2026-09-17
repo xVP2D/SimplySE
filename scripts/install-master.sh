@@ -279,6 +279,13 @@ if $SUDO test -d "$INSTALL_DIR"; then
   $SUDO chmod -R a+rX "$INSTALL_DIR" 2>/dev/null || true
   $SUDO chmod 600 "$INSTALL_DIR"/deploy/certs/*.key 2>/dev/null || true
 fi
+# Same reasoning, but for the *parent* of INSTALL_DIR (e.g. /opt itself):
+# a hardened baseline can leave that non-traversable for anyone but root
+# too, which systemd reports as "Unable to locate executable" — one level
+# up from where the previous fix looks. Not recursive: this directory may
+# contain unrelated things we shouldn't touch, we only need to pass
+# through it, not read/write it.
+$SUDO chmod o+x "$(dirname "$INSTALL_DIR")" 2>/dev/null || true
 
 if $SUDO test -d "$INSTALL_DIR/.git"; then
   # $SUDO, not a bare [[ -d ]]: root (the owner) can always stat it, but an
