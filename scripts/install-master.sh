@@ -263,6 +263,21 @@ export PATH="/usr/local/node/bin:$PATH"
 # near the end, for the one thing SERVICE_USER actually needs to read.
 if $SUDO test -d "$INSTALL_DIR"; then
   $SUDO chown -R root:root "$INSTALL_DIR" 2>/dev/null || true
+  # Also normalize permission *bits*, not just ownership: a hardened
+  # default umask (seen on CIS-baselined images — e.g. root's umask set
+  # to 077 instead of 022) makes every file root creates here (git clone,
+  # go build, npm install) unreadable/unexecutable by anyone else,
+  # including the unprivileged SERVICE_USER the master service runs as.
+  # systemd then can't even exec the binary and reports the opaque
+  # "203/EXEC" — no application error, because it never got that far.
+  # `a+rX`: read for everyone, execute for everyone only where some
+  # execute bit already existed (directories, and files already
+  # executable for at least one class) — never turns a data file into an
+  # executable. Re-lock the private keys right after: this grant would
+  # otherwise have made an *existing* master.key/agent-dev.key
+  # world-readable too.
+  $SUDO chmod -R a+rX "$INSTALL_DIR" 2>/dev/null || true
+  $SUDO chmod 600 "$INSTALL_DIR"/deploy/certs/*.key 2>/dev/null || true
 fi
 
 if $SUDO test -d "$INSTALL_DIR/.git"; then
