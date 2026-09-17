@@ -77,3 +77,13 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
 );
 
 CREATE INDEX IF NOT EXISTS idx_idempotency_keys_created_at ON idempotency_keys (created_at);
+
+-- Latest SELinux inventory snapshot per agent (booleans + loaded policy
+-- modules). Overwritten in place on every SelinuxInventory message — this
+-- is current state, not a time series, so there's no history to keep.
+CREATE TABLE IF NOT EXISTS agent_selinux_state (
+    agent_id      TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+    booleans_json JSONB NOT NULL DEFAULT '[]',
+    modules_json  JSONB NOT NULL DEFAULT '[]',
+    collected_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

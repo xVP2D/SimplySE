@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, type Agent, type AvcEventHit, type Command } from "../lib/api";
+import { api, type Agent, type AvcEventHit, type Command, type SelinuxState } from "../lib/api";
 import { DeployRuleDialog } from "../components/DeployRuleDialog";
 import { formatPayload, statusTagClass } from "../lib/commandFormat";
 import { randomUUID } from "../lib/uuid";
@@ -10,22 +10,28 @@ export function AgentDetail() {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [denials, setDenials] = useState<AvcEventHit[]>([]);
   const [commands, setCommands] = useState<Command[]>([]);
+  const [selinuxState, setSelinuxState] = useState<SelinuxState | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [expandedDenial, setExpandedDenial] = useState<number | null>(null);
   const [switchingMode, setSwitchingMode] = useState(false);
+  const [switchingBoolean, setSwitchingBoolean] = useState<string | null>(null);
+  const [booleanFilter, setBooleanFilter] = useState("");
+  const [moduleFilter, setModuleFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
     if (!id) return;
     try {
-      const [detail, denialsResult, commandsResult] = await Promise.all([
+      const [detail, denialsResult, commandsResult, selinuxResult] = await Promise.all([
         api.getAgent(id),
         api.listDenials({ agentId: id, limit: 50 }),
         api.recentCommands({ agentId: id, limit: 20 }),
+        api.getAgentSelinux(id),
       ]);
       setAgent({ ...detail.agent, connected: detail.connected });
       setDenials(denialsResult.events ?? []);
       setCommands(commandsResult.commands ?? []);
+      setSelinuxState(selinuxResult);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -53,6 +59,29 @@ export function AgentDetail() {
       setError((err as Error).message);
     } finally {
       setSwitchingMode(false);
+    }
+  };
+
+  const toggleBoolean = async (b: { name: string; value: boolean }) => {
+    if (!agent) return;
+    const newValue = !b.value;
+    if (!window.confirm(`Passer le booléen ${b.name} à ${newValue ? "on" : "off"} sur ${agent.hostname} ?`)) return;
+    setSwitchingBoolean(b.name);
+    try {
+      await api.deployRule(
+        {
+          name: `Booléen ${b.name} = ${newValue}`,
+          type: "set_boolean",
+          payload_json: JSON.stringify({ name: b.name, value: newValue }),
+          agent_ids: [agent.id],
+        },
+        randomUUID(),
+      );
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSwitchingBoolean(null);
     }
   };
 
@@ -193,6 +222,136 @@ export function AgentDetail() {
                 <tr>
                   <td colSpan={5} style={{ color: "var(--color-neutral-500)" }}>
                     Aucune règle déployée sur cet agent pour l'instant.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8.4,
+          padding: 14,
+          borderRadius: 8,
+          background: "var(--color-surface)",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8.4 }}>
+          <h5 style={{ margin: 0, fontSize: 15 }}>
+            Booléens SELinux{" "}
+            <span className="tag tag-neutral" style={{ marginLeft: 4.2 }}>
+              {selinuxState?.booleans.length ?? 0}
+            </span>
+          </h5>
+          <div style={{ display: "flex", alignItems: "center", gap: 8.4 }}>
+            {selinuxState?.collected_at && (
+              <span style={{ fontSize: 11, color: "var(--color-neutral-500)" }}>
+                relevé {new Date(selinuxState.collected_at).toLocaleString()}
+              </span>
+            )}
+            <input
+              className="input"
+              placeholder="Filtrer…"
+              style={{ width: 180 }}
+              value={booleanFilter}
+              onChange={(e) => setBooleanFilter(e.target.value)}
+            />
+          </div>
+        </div>
+        <div style={{ overflowX: "auto", maxHeight: 320, overflowY: "auto" }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Valeur</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {(selinuxState?.booleans ?? [])
+                .filter((b) => b.name.toLowerCase().includes(booleanFilter.toLowerCase()))
+                .map((b) => (
+                  <tr key={b.name}>
+                    <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5 }}>{b.name}</td>
+                    <td>
+                      <span className={b.value ? "tag tag-accent" : "tag tag-neutral"}>{b.value ? "on" : "off"}</span>
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        disabled={switchingBoolean === b.name}
+                        onClick={() => toggleBoolean(b)}
+                      >
+                        Basculer
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              {selinuxState && selinuxState.booleans.length === 0 && (
+                <tr>
+                  <td colSpan={3} style={{ color: "var(--color-neutral-500)" }}>
+                    Aucune donnée pour l'instant — envoyée automatiquement par l'agent après connexion.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8.4,
+          padding: 14,
+          borderRadius: 8,
+          background: "var(--color-surface)",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8.4 }}>
+          <h5 style={{ margin: 0, fontSize: 15 }}>
+            Modules de policy{" "}
+            <span className="tag tag-neutral" style={{ marginLeft: 4.2 }}>
+              {selinuxState?.modules.length ?? 0}
+            </span>
+          </h5>
+          <input
+            className="input"
+            placeholder="Filtrer…"
+            style={{ width: 180 }}
+            value={moduleFilter}
+            onChange={(e) => setModuleFilter(e.target.value)}
+          />
+        </div>
+        <div style={{ overflowX: "auto", maxHeight: 320, overflowY: "auto" }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Version</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(selinuxState?.modules ?? [])
+                .filter((m) => m.name.toLowerCase().includes(moduleFilter.toLowerCase()))
+                .map((m) => (
+                  <tr key={m.name}>
+                    <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5 }}>{m.name}</td>
+                    <td style={{ fontSize: 12, color: "var(--color-neutral-400)" }}>{m.version || "—"}</td>
+                  </tr>
+                ))}
+              {selinuxState && selinuxState.modules.length === 0 && (
+                <tr>
+                  <td colSpan={2} style={{ color: "var(--color-neutral-500)" }}>
+                    Aucune donnée pour l'instant — envoyée automatiquement par l'agent après connexion.
                   </td>
                 </tr>
               )}

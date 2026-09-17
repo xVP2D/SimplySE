@@ -7,6 +7,8 @@ import (
 	"context"
 	"database/sql"
 	_ "embed"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -391,4 +393,73 @@ func (s *Store) CompleteIdempotentRequest(ctx context.Context, key string, statu
 		return fmt.Errorf("complete idempotency key: %w", err)
 	}
 	return nil
+}
+
+type SelinuxBoolean struct {
+	Name  string `json:"name"`
+	Value bool   `json:"value"`
+}
+
+type SelinuxModule struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+type SelinuxState struct {
+	AgentID     string           `json:"agent_id"`
+	Booleans    []SelinuxBoolean `json:"booleans"`
+	Modules     []SelinuxModule  `json:"modules"`
+	CollectedAt *time.Time       `json:"collected_at,omitempty"`
+}
+
+// UpsertSelinuxState overwrites the previous snapshot for agentID — see
+// the SelinuxInventory proto comment for why this isn't append-only.
+func (s *Store) UpsertSelinuxState(ctx context.Context, agentID string, booleans []SelinuxBoolean, modules []SelinuxModule, collectedAt time.Time) error {
+	booleansJSON, err := json.Marshal(booleans)
+	if err != nil {
+		return fmt.Errorf("marshal booleans: %w", err)
+	}
+	modulesJSON, err := json.Marshal(modules)
+	if err != nil {
+		return fmt.Errorf("marshal modules: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO agent_selinux_state (agent_id, booleans_json, modules_json, collected_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (agent_id) DO UPDATE SET
+			booleans_json = EXCLUDED.booleans_json,
+			modules_json = EXCLUDED.modules_json,
+			collected_at = EXCLUDED.collected_at
+	`, agentID, booleansJSON, modulesJSON, collectedAt)
+	if err != nil {
+		return fmt.Errorf("upsert selinux state: %w", err)
+	}
+	return nil
+}
+
+// GetSelinuxState returns (state, false, nil) — not an error — when the
+// agent hasn't sent an inventory snapshot yet (e.g. just enrolled, or
+// running an older agent build that predates this feature).
+func (s *Store) GetSelinuxState(ctx context.Context, agentID string) (SelinuxState, bool, error) {
+	state := SelinuxState{AgentID: agentID, Booleans: []SelinuxBoolean{}, Modules: []SelinuxModule{}}
+	var booleansJSON, modulesJSON []byte
+	var collectedAt time.Time
+	err := s.db.QueryRowContext(ctx, `
+		SELECT booleans_json, modules_json, collected_at
+		FROM agent_selinux_state WHERE agent_id = $1
+	`, agentID).Scan(&booleansJSON, &modulesJSON, &collectedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return state, false, nil
+	}
+	if err != nil {
+		return SelinuxState{}, false, fmt.Errorf("get selinux state %s: %w", agentID, err)
+	}
+	if err := json.Unmarshal(booleansJSON, &state.Booleans); err != nil {
+		return SelinuxState{}, false, fmt.Errorf("unmarshal booleans: %w", err)
+	}
+	if err := json.Unmarshal(modulesJSON, &state.Modules); err != nil {
+		return SelinuxState{}, false, fmt.Errorf("unmarshal modules: %w", err)
+	}
+	state.CollectedAt = &collectedAt
+	return state, true, nil
 }

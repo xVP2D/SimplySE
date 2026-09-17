@@ -3,6 +3,7 @@ mod buffer;
 mod collector;
 mod config;
 mod grpc;
+mod selinux_info;
 
 pub mod pb {
     tonic::include_proto!("selinux.v1");

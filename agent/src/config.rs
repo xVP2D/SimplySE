@@ -15,6 +15,10 @@ pub struct Config {
     pub tls_key: PathBuf,
     pub tls_domain: String,
     pub heartbeat_interval_secs: u64,
+    /// Booleans/loaded modules change far less often than heartbeats, so
+    /// this snapshot is collected (a couple of subprocess calls) on its
+    /// own, longer interval rather than every heartbeat.
+    pub selinux_inventory_interval_secs: u64,
 }
 
 impl Config {
@@ -35,6 +39,9 @@ impl Config {
             heartbeat_interval_secs: env_or("HEARTBEAT_INTERVAL_SECS", "10")
                 .parse()
                 .unwrap_or(10),
+            selinux_inventory_interval_secs: env_or("SELINUX_INVENTORY_INTERVAL_SECS", "60")
+                .parse()
+                .unwrap_or(60),
         }
     }
 }

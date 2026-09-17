@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"time"
 
 	"google.golang.org/grpc/peer"
 
@@ -132,6 +133,21 @@ func (s *AgentLinkServer) handleIncoming(ctx context.Context, agentID string, ms
 		ack := p.Ack
 		if err := s.Store.UpdateCommandAck(ctx, ack.GetCommandId(), ack.GetSuccess(), ack.GetMessage()); err != nil {
 			s.Log.Error("update command ack failed", "command_id", ack.GetCommandId(), "error", err)
+		}
+
+	case *selinuxv1.AgentMessage_SelinuxInventory:
+		inv := p.SelinuxInventory
+		booleans := make([]postgres.SelinuxBoolean, 0, len(inv.GetBooleans()))
+		for _, b := range inv.GetBooleans() {
+			booleans = append(booleans, postgres.SelinuxBoolean{Name: b.GetName(), Value: b.GetValue()})
+		}
+		modules := make([]postgres.SelinuxModule, 0, len(inv.GetModules()))
+		for _, m := range inv.GetModules() {
+			modules = append(modules, postgres.SelinuxModule{Name: m.GetName(), Version: m.GetVersion()})
+		}
+		collectedAt := time.Unix(inv.GetTsUnix(), 0)
+		if err := s.Store.UpsertSelinuxState(ctx, agentID, booleans, modules, collectedAt); err != nil {
+			s.Log.Error("upsert selinux state failed", "agent_id", agentID, "error", err)
 		}
 
 	default:

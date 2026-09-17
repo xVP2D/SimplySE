@@ -87,6 +87,7 @@ type AgentMessage struct {
 	//	*AgentMessage_Heartbeat
 	//	*AgentMessage_AvcEvent
 	//	*AgentMessage_Ack
+	//	*AgentMessage_SelinuxInventory
 	Payload       isAgentMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -165,6 +166,15 @@ func (x *AgentMessage) GetAck() *CommandAck {
 	return nil
 }
 
+func (x *AgentMessage) GetSelinuxInventory() *SelinuxInventory {
+	if x != nil {
+		if x, ok := x.Payload.(*AgentMessage_SelinuxInventory); ok {
+			return x.SelinuxInventory
+		}
+	}
+	return nil
+}
+
 type isAgentMessage_Payload interface {
 	isAgentMessage_Payload()
 }
@@ -185,6 +195,10 @@ type AgentMessage_Ack struct {
 	Ack *CommandAck `protobuf:"bytes,4,opt,name=ack,proto3,oneof"`
 }
 
+type AgentMessage_SelinuxInventory struct {
+	SelinuxInventory *SelinuxInventory `protobuf:"bytes,5,opt,name=selinux_inventory,json=selinuxInventory,proto3,oneof"`
+}
+
 func (*AgentMessage_Enroll) isAgentMessage_Payload() {}
 
 func (*AgentMessage_Heartbeat) isAgentMessage_Payload() {}
@@ -192,6 +206,8 @@ func (*AgentMessage_Heartbeat) isAgentMessage_Payload() {}
 func (*AgentMessage_AvcEvent) isAgentMessage_Payload() {}
 
 func (*AgentMessage_Ack) isAgentMessage_Payload() {}
+
+func (*AgentMessage_SelinuxInventory) isAgentMessage_Payload() {}
 
 // Sent once, as the first message on a newly opened stream.
 type EnrollInfo struct {
@@ -522,6 +538,184 @@ func (x *CommandAck) GetMessage() string {
 	return ""
 }
 
+type SelinuxBoolean struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Value         bool                   `protobuf:"varint,2,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SelinuxBoolean) Reset() {
+	*x = SelinuxBoolean{}
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SelinuxBoolean) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SelinuxBoolean) ProtoMessage() {}
+
+func (x *SelinuxBoolean) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SelinuxBoolean.ProtoReflect.Descriptor instead.
+func (*SelinuxBoolean) Descriptor() ([]byte, []int) {
+	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SelinuxBoolean) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SelinuxBoolean) GetValue() bool {
+	if x != nil {
+		return x.Value
+	}
+	return false
+}
+
+type SelinuxModule struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"` // empty when the local `semodule -l` doesn't print one
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SelinuxModule) Reset() {
+	*x = SelinuxModule{}
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SelinuxModule) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SelinuxModule) ProtoMessage() {}
+
+func (x *SelinuxModule) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SelinuxModule.ProtoReflect.Descriptor instead.
+func (*SelinuxModule) Descriptor() ([]byte, []int) {
+	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SelinuxModule) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SelinuxModule) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+// Sent once right after connecting and then periodically (see
+// SELINUX_INVENTORY_INTERVAL_SECS): a full snapshot, not a diff, of the
+// SELinux state that changes far less often than heartbeats/AVC events —
+// booleans and loaded policy modules. Overwrites the previous snapshot on
+// the master rather than appending, since only the current state matters
+// (there's no need to keep history of every booleans/modules snapshot).
+type SelinuxInventory struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	TsUnix        int64                  `protobuf:"varint,2,opt,name=ts_unix,json=tsUnix,proto3" json:"ts_unix,omitempty"`
+	Booleans      []*SelinuxBoolean      `protobuf:"bytes,3,rep,name=booleans,proto3" json:"booleans,omitempty"`
+	Modules       []*SelinuxModule       `protobuf:"bytes,4,rep,name=modules,proto3" json:"modules,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SelinuxInventory) Reset() {
+	*x = SelinuxInventory{}
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SelinuxInventory) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SelinuxInventory) ProtoMessage() {}
+
+func (x *SelinuxInventory) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SelinuxInventory.ProtoReflect.Descriptor instead.
+func (*SelinuxInventory) Descriptor() ([]byte, []int) {
+	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *SelinuxInventory) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *SelinuxInventory) GetTsUnix() int64 {
+	if x != nil {
+		return x.TsUnix
+	}
+	return 0
+}
+
+func (x *SelinuxInventory) GetBooleans() []*SelinuxBoolean {
+	if x != nil {
+		return x.Booleans
+	}
+	return nil
+}
+
+func (x *SelinuxInventory) GetModules() []*SelinuxModule {
+	if x != nil {
+		return x.Modules
+	}
+	return nil
+}
+
 type ServerMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Payload:
@@ -535,7 +729,7 @@ type ServerMessage struct {
 
 func (x *ServerMessage) Reset() {
 	*x = ServerMessage{}
-	mi := &file_proto_selinux_v1_agent_proto_msgTypes[5]
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -547,7 +741,7 @@ func (x *ServerMessage) String() string {
 func (*ServerMessage) ProtoMessage() {}
 
 func (x *ServerMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_selinux_v1_agent_proto_msgTypes[5]
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -560,7 +754,7 @@ func (x *ServerMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerMessage.ProtoReflect.Descriptor instead.
 func (*ServerMessage) Descriptor() ([]byte, []int) {
-	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{5}
+	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ServerMessage) GetPayload() isServerMessage_Payload {
@@ -615,7 +809,7 @@ type Command struct {
 
 func (x *Command) Reset() {
 	*x = Command{}
-	mi := &file_proto_selinux_v1_agent_proto_msgTypes[6]
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -627,7 +821,7 @@ func (x *Command) String() string {
 func (*Command) ProtoMessage() {}
 
 func (x *Command) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_selinux_v1_agent_proto_msgTypes[6]
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -640,7 +834,7 @@ func (x *Command) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Command.ProtoReflect.Descriptor instead.
 func (*Command) Descriptor() ([]byte, []int) {
-	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{6}
+	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Command) GetCommandId() string {
@@ -673,7 +867,7 @@ type HeartbeatAck struct {
 
 func (x *HeartbeatAck) Reset() {
 	*x = HeartbeatAck{}
-	mi := &file_proto_selinux_v1_agent_proto_msgTypes[7]
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -685,7 +879,7 @@ func (x *HeartbeatAck) String() string {
 func (*HeartbeatAck) ProtoMessage() {}
 
 func (x *HeartbeatAck) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_selinux_v1_agent_proto_msgTypes[7]
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -698,7 +892,7 @@ func (x *HeartbeatAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatAck.ProtoReflect.Descriptor instead.
 func (*HeartbeatAck) Descriptor() ([]byte, []int) {
-	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{7}
+	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *HeartbeatAck) GetServerTsUnix() int64 {
@@ -713,12 +907,13 @@ var File_proto_selinux_v1_agent_proto protoreflect.FileDescriptor
 const file_proto_selinux_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"\x1cproto/selinux/v1/agent.proto\x12\n" +
-	"selinux.v1\"\xe3\x01\n" +
+	"selinux.v1\"\xb0\x02\n" +
 	"\fAgentMessage\x120\n" +
 	"\x06enroll\x18\x01 \x01(\v2\x16.selinux.v1.EnrollInfoH\x00R\x06enroll\x125\n" +
 	"\theartbeat\x18\x02 \x01(\v2\x15.selinux.v1.HeartbeatH\x00R\theartbeat\x123\n" +
 	"\tavc_event\x18\x03 \x01(\v2\x14.selinux.v1.AvcEventH\x00R\bavcEvent\x12*\n" +
-	"\x03ack\x18\x04 \x01(\v2\x16.selinux.v1.CommandAckH\x00R\x03ackB\t\n" +
+	"\x03ack\x18\x04 \x01(\v2\x16.selinux.v1.CommandAckH\x00R\x03ack\x12K\n" +
+	"\x11selinux_inventory\x18\x05 \x01(\v2\x1c.selinux.v1.SelinuxInventoryH\x00R\x10selinuxInventoryB\t\n" +
 	"\apayload\"\xae\x01\n" +
 	"\n" +
 	"EnrollInfo\x12\x19\n" +
@@ -752,7 +947,18 @@ const file_proto_selinux_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage\"\x8c\x01\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\":\n" +
+	"\x0eSelinuxBoolean\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\bR\x05value\"=\n" +
+	"\rSelinuxModule\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\"\xb3\x01\n" +
+	"\x10SelinuxInventory\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x17\n" +
+	"\ats_unix\x18\x02 \x01(\x03R\x06tsUnix\x126\n" +
+	"\bbooleans\x18\x03 \x03(\v2\x1a.selinux.v1.SelinuxBooleanR\bbooleans\x123\n" +
+	"\amodules\x18\x04 \x03(\v2\x19.selinux.v1.SelinuxModuleR\amodules\"\x8c\x01\n" +
 	"\rServerMessage\x12/\n" +
 	"\acommand\x18\x01 \x01(\v2\x13.selinux.v1.CommandH\x00R\acommand\x12?\n" +
 	"\rheartbeat_ack\x18\x02 \x01(\v2\x18.selinux.v1.HeartbeatAckH\x00R\fheartbeatAckB\t\n" +
@@ -786,33 +992,39 @@ func file_proto_selinux_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_selinux_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_proto_selinux_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_proto_selinux_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_proto_selinux_v1_agent_proto_goTypes = []any{
-	(CommandType)(0),      // 0: selinux.v1.CommandType
-	(*AgentMessage)(nil),  // 1: selinux.v1.AgentMessage
-	(*EnrollInfo)(nil),    // 2: selinux.v1.EnrollInfo
-	(*Heartbeat)(nil),     // 3: selinux.v1.Heartbeat
-	(*AvcEvent)(nil),      // 4: selinux.v1.AvcEvent
-	(*CommandAck)(nil),    // 5: selinux.v1.CommandAck
-	(*ServerMessage)(nil), // 6: selinux.v1.ServerMessage
-	(*Command)(nil),       // 7: selinux.v1.Command
-	(*HeartbeatAck)(nil),  // 8: selinux.v1.HeartbeatAck
+	(CommandType)(0),         // 0: selinux.v1.CommandType
+	(*AgentMessage)(nil),     // 1: selinux.v1.AgentMessage
+	(*EnrollInfo)(nil),       // 2: selinux.v1.EnrollInfo
+	(*Heartbeat)(nil),        // 3: selinux.v1.Heartbeat
+	(*AvcEvent)(nil),         // 4: selinux.v1.AvcEvent
+	(*CommandAck)(nil),       // 5: selinux.v1.CommandAck
+	(*SelinuxBoolean)(nil),   // 6: selinux.v1.SelinuxBoolean
+	(*SelinuxModule)(nil),    // 7: selinux.v1.SelinuxModule
+	(*SelinuxInventory)(nil), // 8: selinux.v1.SelinuxInventory
+	(*ServerMessage)(nil),    // 9: selinux.v1.ServerMessage
+	(*Command)(nil),          // 10: selinux.v1.Command
+	(*HeartbeatAck)(nil),     // 11: selinux.v1.HeartbeatAck
 }
 var file_proto_selinux_v1_agent_proto_depIdxs = []int32{
-	2, // 0: selinux.v1.AgentMessage.enroll:type_name -> selinux.v1.EnrollInfo
-	3, // 1: selinux.v1.AgentMessage.heartbeat:type_name -> selinux.v1.Heartbeat
-	4, // 2: selinux.v1.AgentMessage.avc_event:type_name -> selinux.v1.AvcEvent
-	5, // 3: selinux.v1.AgentMessage.ack:type_name -> selinux.v1.CommandAck
-	7, // 4: selinux.v1.ServerMessage.command:type_name -> selinux.v1.Command
-	8, // 5: selinux.v1.ServerMessage.heartbeat_ack:type_name -> selinux.v1.HeartbeatAck
-	0, // 6: selinux.v1.Command.type:type_name -> selinux.v1.CommandType
-	1, // 7: selinux.v1.AgentLink.Session:input_type -> selinux.v1.AgentMessage
-	6, // 8: selinux.v1.AgentLink.Session:output_type -> selinux.v1.ServerMessage
-	8, // [8:9] is the sub-list for method output_type
-	7, // [7:8] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	2,  // 0: selinux.v1.AgentMessage.enroll:type_name -> selinux.v1.EnrollInfo
+	3,  // 1: selinux.v1.AgentMessage.heartbeat:type_name -> selinux.v1.Heartbeat
+	4,  // 2: selinux.v1.AgentMessage.avc_event:type_name -> selinux.v1.AvcEvent
+	5,  // 3: selinux.v1.AgentMessage.ack:type_name -> selinux.v1.CommandAck
+	8,  // 4: selinux.v1.AgentMessage.selinux_inventory:type_name -> selinux.v1.SelinuxInventory
+	6,  // 5: selinux.v1.SelinuxInventory.booleans:type_name -> selinux.v1.SelinuxBoolean
+	7,  // 6: selinux.v1.SelinuxInventory.modules:type_name -> selinux.v1.SelinuxModule
+	10, // 7: selinux.v1.ServerMessage.command:type_name -> selinux.v1.Command
+	11, // 8: selinux.v1.ServerMessage.heartbeat_ack:type_name -> selinux.v1.HeartbeatAck
+	0,  // 9: selinux.v1.Command.type:type_name -> selinux.v1.CommandType
+	1,  // 10: selinux.v1.AgentLink.Session:input_type -> selinux.v1.AgentMessage
+	9,  // 11: selinux.v1.AgentLink.Session:output_type -> selinux.v1.ServerMessage
+	11, // [11:12] is the sub-list for method output_type
+	10, // [10:11] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_proto_selinux_v1_agent_proto_init() }
@@ -825,8 +1037,9 @@ func file_proto_selinux_v1_agent_proto_init() {
 		(*AgentMessage_Heartbeat)(nil),
 		(*AgentMessage_AvcEvent)(nil),
 		(*AgentMessage_Ack)(nil),
+		(*AgentMessage_SelinuxInventory)(nil),
 	}
-	file_proto_selinux_v1_agent_proto_msgTypes[5].OneofWrappers = []any{
+	file_proto_selinux_v1_agent_proto_msgTypes[8].OneofWrappers = []any{
 		(*ServerMessage_Command)(nil),
 		(*ServerMessage_HeartbeatAck)(nil),
 	}
@@ -836,7 +1049,7 @@ func file_proto_selinux_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_selinux_v1_agent_proto_rawDesc), len(file_proto_selinux_v1_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   8,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

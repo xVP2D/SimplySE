@@ -59,6 +59,23 @@ export interface CommandSearchResult {
   total: number;
 }
 
+export interface SelinuxBoolean {
+  name: string;
+  value: boolean;
+}
+
+export interface SelinuxModule {
+  name: string;
+  version: string;
+}
+
+export interface SelinuxState {
+  agent_id: string;
+  booleans: SelinuxBoolean[];
+  modules: SelinuxModule[];
+  collected_at?: string;
+}
+
 export interface Alert {
   id: string;
   type: string;
@@ -96,6 +113,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   listAgents: () => request<Agent[]>("/agents"),
   getAgent: (id: string) => request<{ agent: Agent; connected: boolean }>(`/agents/${id}`),
+  getAgentSelinux: (id: string) => request<SelinuxState>(`/agents/${id}/selinux`),
   listDenials: (params: { agentId?: string; query?: string; offset?: number; limit?: number } = {}) => {
     const qs = new URLSearchParams();
     if (params.agentId) qs.set("agent_id", params.agentId);

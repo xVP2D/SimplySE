@@ -10,6 +10,7 @@ use crate::buffer::DiskBuffer;
 use crate::collector::AvcDenial;
 use crate::config::Config;
 use crate::pb;
+use crate::selinux_info;
 
 const RECONNECT_DELAY: Duration = Duration::from_secs(3);
 
@@ -51,10 +52,23 @@ async fn connect_and_serve(
         tokio::time::interval(Duration::from_secs(config.heartbeat_interval_secs));
     heartbeat_interval.tick().await; // first tick fires immediately; consume it
 
+    // Unlike heartbeat_interval, this one's first (immediate) tick is
+    // *not* consumed: booleans/modules are worth sending right away on
+    // (re)connect rather than waiting a full interval, since the previous
+    // snapshot on the master could otherwise be stale for that long.
+    let mut inventory_interval =
+        tokio::time::interval(Duration::from_secs(config.selinux_inventory_interval_secs));
+
     loop {
         tokio::select! {
             _ = heartbeat_interval.tick() => {
                 if out_tx.send(heartbeat_message(config)).await.is_err() {
+                    return Err(anyhow!("outbound channel closed"));
+                }
+            }
+            _ = inventory_interval.tick() => {
+                let msg = selinux_inventory_message(&config.agent_id).await;
+                if out_tx.send(msg).await.is_err() {
                     return Err(anyhow!("outbound channel closed"));
                 }
             }
@@ -170,6 +184,24 @@ fn avc_event_message(agent_id: &str, event: &AvcDenial) -> pb::AgentMessage {
             pid: event.pid.clone(),
             raw_line: event.raw_line.clone(),
         })),
+    }
+}
+
+async fn selinux_inventory_message(agent_id: &str) -> pb::AgentMessage {
+    let ts_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let (booleans, modules) = selinux_info::collect().await;
+    pb::AgentMessage {
+        payload: Some(pb::agent_message::Payload::SelinuxInventory(
+            pb::SelinuxInventory {
+                agent_id: agent_id.to_string(),
+                ts_unix,
+                booleans,
+                modules,
+            },
+        )),
     }
 }
 

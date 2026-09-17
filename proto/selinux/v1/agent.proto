@@ -23,6 +23,7 @@ message AgentMessage {
     Heartbeat heartbeat = 2;
     AvcEvent avc_event = 3;
     CommandAck ack = 4;
+    SelinuxInventory selinux_inventory = 5;
   }
 }
 
@@ -60,6 +61,29 @@ message CommandAck {
   string command_id = 1;
   bool success = 2;
   string message = 3;
+}
+
+message SelinuxBoolean {
+  string name = 1;
+  bool value = 2;
+}
+
+message SelinuxModule {
+  string name = 1;
+  string version = 2; // empty when the local `semodule -l` doesn't print one
+}
+
+// Sent once right after connecting and then periodically (see
+// SELINUX_INVENTORY_INTERVAL_SECS): a full snapshot, not a diff, of the
+// SELinux state that changes far less often than heartbeats/AVC events —
+// booleans and loaded policy modules. Overwrites the previous snapshot on
+// the master rather than appending, since only the current state matters
+// (there's no need to keep history of every booleans/modules snapshot).
+message SelinuxInventory {
+  string agent_id = 1;
+  int64 ts_unix = 2;
+  repeated SelinuxBoolean booleans = 3;
+  repeated SelinuxModule modules = 4;
 }
 
 // ---- master -> agent ----

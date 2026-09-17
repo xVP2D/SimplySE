@@ -57,6 +57,7 @@ func (a *API) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/agents", a.listAgents)
 	mux.HandleFunc("GET /api/agents/{id}", a.getAgent)
+	mux.HandleFunc("GET /api/agents/{id}/selinux", a.getAgentSelinux)
 	mux.HandleFunc("GET /api/denials", a.listDenials)
 	mux.HandleFunc("GET /api/denials/top", a.topSignatures)
 	mux.HandleFunc("POST /api/rules/deploy", a.deployRule)
@@ -211,6 +212,21 @@ func (a *API) getAgent(w http.ResponseWriter, r *http.Request) {
 		"agent":     agent,
 		"connected": a.Hub.IsConnected(id),
 	})
+}
+
+// getAgentSelinux returns the latest SELinux inventory snapshot (booleans +
+// loaded policy modules) reported by this agent. An agent that hasn't sent
+// one yet (just enrolled, or running a pre-inventory build) isn't an
+// error: it returns empty lists rather than 404, since "no data yet" is a
+// normal, expected state here.
+func (a *API) getAgentSelinux(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	state, _, err := a.Store.GetSelinuxState(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
 }
 
 func (a *API) listDenials(w http.ResponseWriter, r *http.Request) {
