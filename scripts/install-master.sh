@@ -383,6 +383,42 @@ $SUDO env "PATH=$PATH" npm --prefix "$INSTALL_DIR/frontend" run build
 $SUDO chmod -R a+rX "$INSTALL_DIR" 2>/dev/null || true
 $SUDO chmod 600 "$INSTALL_DIR"/deploy/certs/*.key 2>/dev/null || true
 
+# On SELinux hosts, `go build`'s output isn't just wrong on permission
+# *bits* — it also carries the wrong *label*. Go builds into a temp file
+# and renames it into place; a rename preserves the source's SELinux
+# context instead of inheriting the destination directory's, so the
+# binary comes out labeled as a generic temp-file type (e.g. user_tmp_t)
+# rather than an executable type. systemd runs services from the init_t
+# domain, which has no rule allowing it to execute that type without a
+# domain transition — the kernel denies it, and because that specific
+# denial is dontaudit'd in the shipped policy, it never shows up in
+# ausearch/journalctl at all: systemd just reports the opaque 203/EXEC,
+# indistinguishable from a DAC problem from the log alone (confirmed by
+# reproducing this exact box's failure, and confirming `setenforce 0`
+# alone — nothing else — made it start). A manual `sudo -u <service user>
+# <binary>` test is misleading here: an interactive login shell runs
+# unconfined, which is allowed to execute virtually any type, so it
+# "works" even though the systemd-launched service still can't.
+# bin_t is the standard generic executable type nearly every domain
+# (including init_t) is allowed to execute_no_trans — semanage records
+# the mapping persistently so future rebuilds (which recreate the file,
+# and so its label) get relabeled the same way without re-adding the rule.
+if command -v getenforce >/dev/null 2>&1 && [[ "$(getenforce)" != "Disabled" ]]; then
+  log "SELinux is active: relabeling the master binary as bin_t so systemd (running as init_t) is allowed to execute it"
+  if ! command -v semanage >/dev/null 2>&1; then
+    case "$PKG_MANAGER" in
+      dnf) $SUDO dnf install -y policycoreutils-python-utils ;;
+      yum) $SUDO yum install -y policycoreutils-python-utils ;;
+      zypper) $SUDO zypper --non-interactive install policycoreutils-python-utils ;;
+      *) warn "SELinux is active but 'semanage' isn't available and couldn't be auto-installed on this distro; the master binary may fail to start with a bare 203/EXEC. Install policycoreutils-python-utils (or equivalent) and run: semanage fcontext -a -t bin_t '${INSTALL_DIR}/master/bin/master' && restorecon -v '${INSTALL_DIR}/master/bin/master'" ;;
+    esac
+  fi
+  if command -v semanage >/dev/null 2>&1; then
+    $SUDO semanage fcontext -a -t bin_t "${INSTALL_DIR}/master/bin/master" 2>/dev/null || true
+    $SUDO restorecon -v "${INSTALL_DIR}/master/bin/master" 2>/dev/null || true
+  fi
+fi
+
 POSTGRES_DSN="${POSTGRES_DSN:-postgres://selinux:${POSTGRES_PASSWORD}@localhost:${POSTGRES_HOST_PORT}/selinux?sslmode=disable}"
 {
   echo "GRPC_ADDR=${GRPC_ADDR}"
