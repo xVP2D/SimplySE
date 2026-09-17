@@ -255,12 +255,21 @@ EOF
 ensure_node
 export PATH="/usr/local/node/bin:$PATH"
 
+# Self-heal from older versions of this script (before commit d397e09),
+# which chowned the whole tree to SERVICE_USER — breaking every plain
+# [[ -d/-f ]] check below (and this repo's own re-clone detection) for
+# whoever re-runs the installer without being that exact user. Ownership
+# stays root:root going forward; only master.key gets a narrow exception
+# near the end, for the one thing SERVICE_USER actually needs to read.
+if $SUDO test -d "$INSTALL_DIR"; then
+  $SUDO chown -R root:root "$INSTALL_DIR" 2>/dev/null || true
+fi
+
 if $SUDO test -d "$INSTALL_DIR/.git"; then
-  # $SUDO, not a bare [[ -d ]]: a previous run chowns INSTALL_DIR to
-  # SERVICE_USER at the end, so the invoking (non-root) user may no
-  # longer have permission to even stat it on a re-run — the plain check
-  # would then wrongly report "doesn't exist" and attempt a fresh clone
-  # into a non-empty directory.
+  # $SUDO, not a bare [[ -d ]]: root (the owner) can always stat it, but an
+  # unprivileged re-run as a different user might not be able to —
+  # the plain check would then wrongly report "doesn't exist" and attempt
+  # a fresh clone into a non-empty directory.
   log "updating existing checkout in ${INSTALL_DIR}"
   $SUDO git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
   $SUDO git -C "$INSTALL_DIR" pull --ff-only
@@ -275,9 +284,12 @@ if ! id "$SERVICE_USER" >/dev/null 2>&1; then
   $SUDO useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
 
-if [[ ! -f "$INSTALL_DIR/deploy/certs/ca.crt" ]]; then
+if ! $SUDO test -f "$INSTALL_DIR/deploy/certs/ca.crt"; then
   log "generating mTLS certs (dev-style shared cert — see script header for the limitation)"
-  (cd "$INSTALL_DIR" && bash deploy/scripts/gen-certs.sh)
+  # Absolute path, no external `cd` needed (or wanted — the invoking user
+  # may not have permission to cd into $INSTALL_DIR): gen-certs.sh finds
+  # its own directory from $BASH_SOURCE regardless of caller's cwd.
+  $SUDO bash "$INSTALL_DIR/deploy/scripts/gen-certs.sh"
 else
   log "certs already present in ${INSTALL_DIR}/deploy/certs — leaving them as-is"
 fi
@@ -316,23 +328,27 @@ fi
 # -----------------------------------------------------------------------
 
 log "starting infra (Postgres, OpenSearch, NATS) via docker compose"
-# `env VAR=...` (rather than `sudo -E`) so this works whether $SUDO is
-# "sudo" or empty (already root); empty values still trigger docker
-# compose's own ${VAR:-default} fallback in deploy/docker-compose.yml.
-(cd "$INSTALL_DIR" && $SUDO env \
+# `-f <path>` (no cd needed) and `env VAR=...` (rather than `sudo -E`) so
+# this works whether $SUDO is "sudo" or empty (already root); empty
+# values still trigger docker compose's own ${VAR:-default} fallback in
+# deploy/docker-compose.yml.
+$SUDO env \
   "POSTGRES_HOST_PORT=${POSTGRES_HOST_PORT}" \
   "OPENSEARCH_PORT=${OPENSEARCH_PORT}" \
   "NATS_CLIENT_PORT=${NATS_CLIENT_PORT}" \
   "NATS_MONITOR_PORT=${NATS_MONITOR_PORT}" \
   "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" \
   "OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" \
-  docker compose -f deploy/docker-compose.yml up -d)
+  docker compose -f "$INSTALL_DIR/deploy/docker-compose.yml" up -d
 
 log "building master (this can take a minute the first time)"
-(cd "$INSTALL_DIR/master" && $SUDO env "PATH=$PATH" go build -o bin/master ./cmd/master)
+# -C (no cd needed): avoids depending on the invoking user being able to
+# cd into $INSTALL_DIR at all (unlike $SUDO, a plain `cd` isn't privileged).
+$SUDO env "PATH=$PATH" go build -C "$INSTALL_DIR/master" -o bin/master ./cmd/master
 
 log "building the dashboard (npm install + build — a couple of minutes the first time)"
-(cd "$INSTALL_DIR/frontend" && $SUDO env "PATH=$PATH" npm install --no-fund --no-audit && $SUDO env "PATH=$PATH" npm run build)
+$SUDO env "PATH=$PATH" npm --prefix "$INSTALL_DIR/frontend" install --no-fund --no-audit
+$SUDO env "PATH=$PATH" npm --prefix "$INSTALL_DIR/frontend" run build
 
 POSTGRES_DSN="${POSTGRES_DSN:-postgres://selinux:${POSTGRES_PASSWORD}@localhost:${POSTGRES_HOST_PORT}/selinux?sslmode=disable}"
 {
@@ -379,7 +395,17 @@ ProtectHome=true
 WantedBy=multi-user.target
 EOF
 
-$SUDO chown -R "${SERVICE_USER}:${SERVICE_USER}" "$INSTALL_DIR"
+# The service (running as SERVICE_USER, never root) only needs read
+# access to its TLS private key (gen-certs.sh leaves it 600 root-only) —
+# everything else it touches (binary, frontend/dist, master.crt/ca.crt)
+# already has the default world-readable permissions root's own build
+# steps left it with. Grant that one file group-read rather than chowning
+# the whole tree to SERVICE_USER: that used to make this script unable to
+# even detect/update its own checkout on a later re-run by a different
+# (non-root, sudo-using) operator, since plain [[ -d/-f ]] checks run as
+# the invoking user, not root.
+$SUDO chgrp "${SERVICE_USER}" "${INSTALL_DIR}/deploy/certs/master.key"
+$SUDO chmod 640 "${INSTALL_DIR}/deploy/certs/master.key"
 
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable --now selinux-fleet-master
