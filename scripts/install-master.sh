@@ -57,7 +57,11 @@ warn() { printf '\033[1;33mWARN:\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 INTERACTIVE=0
-[[ -t 0 && -t 1 ]] && INTERACTIVE=1
+# stdin alone: read -p writes its prompt to stderr, not stdout, so
+# redirecting/logging stdout (e.g. `bash install-master.sh > log.txt`, or
+# `| tee log.txt`) must not turn off prompting as long as stdin is still a
+# real terminal.
+[[ -t 0 ]] && INTERACTIVE=1
 
 # prompt VAR "question" "default" — skipped (default used) if VAR is
 # already set in the environment, or if not running interactively.
