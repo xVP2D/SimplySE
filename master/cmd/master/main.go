@@ -46,6 +46,11 @@ type config struct {
 	EnrollToken   string
 	AgentCertFile string
 	AgentKeyFile  string
+
+	// FrontendDist points at the built dashboard (frontend/dist); empty
+	// disables serving it (e.g. local dev, where it runs via its own
+	// `npm run dev`). See api.API.FrontendDist.
+	FrontendDist string
 }
 
 func loadConfig() config {
@@ -61,6 +66,7 @@ func loadConfig() config {
 		EnrollToken:   getenv("ENROLL_TOKEN", ""),
 		AgentCertFile: getenv("AGENT_CERT_FILE", "deploy/certs/agent-dev.crt"),
 		AgentKeyFile:  getenv("AGENT_KEY_FILE", "deploy/certs/agent-dev.key"),
+		FrontendDist:  getenv("FRONTEND_DIST", "frontend/dist"),
 	}
 }
 
@@ -175,12 +181,18 @@ func run(log *slog.Logger) error {
 	if cfg.EnrollToken == "" {
 		log.Warn("ENROLL_TOKEN not set: automatic agent enrollment (GET /api/enroll) is disabled; agents need certs copied by hand")
 	}
+	if _, err := os.Stat(cfg.FrontendDist); err != nil {
+		log.Warn("frontend dist not found, dashboard will not be served (API only)", "path", cfg.FrontendDist)
+	} else {
+		log.Info("serving dashboard", "path", cfg.FrontendDist)
+	}
 	apiHandler := (&api.API{
 		Store: pg, Search: search, Hub: hub, Rules: engine, Log: log,
 		EnrollToken:   cfg.EnrollToken,
 		EnrollCAFile:  cfg.CAFile,
 		EnrollCrtFile: cfg.AgentCertFile,
 		EnrollKeyFile: cfg.AgentKeyFile,
+		FrontendDist:  cfg.FrontendDist,
 	}).Handler()
 	httpServer := &http.Server{Addr: cfg.HTTPAddr, Handler: apiHandler}
 	go func() {

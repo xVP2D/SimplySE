@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -42,6 +43,14 @@ type API struct {
 	EnrollCAFile  string
 	EnrollCrtFile string
 	EnrollKeyFile string
+
+	// FrontendDist, if non-empty, serves the built dashboard (a Vite SPA)
+	// from this directory at "/" — everything not matched by a more
+	// specific /api/* pattern falls through to it, with unknown paths
+	// resolving to index.html so client-side routing (react-router) works
+	// on a hard refresh. Left empty, only the API is served (e.g. local
+	// dev, where the frontend runs via its own `npm run dev` instead).
+	FrontendDist string
 }
 
 func (a *API) Routes() *http.ServeMux {
@@ -57,7 +66,27 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/alerts/{id}/ack", a.acknowledgeAlert)
 	mux.HandleFunc("GET /api/enroll/{file}", a.enroll)
 	mux.HandleFunc("GET /api/health", a.health)
+	if a.FrontendDist != "" {
+		mux.Handle("/", spaHandler(a.FrontendDist))
+	}
 	return mux
+}
+
+// spaHandler serves static files from dist, falling back to
+// dist/index.html for any path that isn't an existing file — so a hard
+// refresh on e.g. /agents/xyz still loads the app and lets react-router
+// take over client-side, instead of 404ing.
+func spaHandler(dist string) http.HandlerFunc {
+	fileServer := http.FileServer(http.Dir(dist))
+	return func(w http.ResponseWriter, r *http.Request) {
+		cleaned := filepath.Clean(r.URL.Path)
+		full := filepath.Join(dist, cleaned)
+		if info, err := os.Stat(full); err == nil && !info.IsDir() {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		http.ServeFile(w, r, filepath.Join(dist, "index.html"))
+	}
 }
 
 func withCORS(next http.Handler) http.Handler {

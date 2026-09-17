@@ -27,9 +27,13 @@
 # filled in) — install-agent.sh uses that token to fetch the shared agent
 # mTLS identity from GET /api/enroll automatically, no manual cert copying.
 #
+# Dashboard: the web UI is built (npm, installed automatically if missing)
+# and served by the master binary itself, on the *same* port as the HTTP
+# API (HTTP_ADDR, default 8080) — no separate web server or port to manage.
+#
 # Environment variables (all optional — see prompts above for the
 # interactive equivalent of each):
-#   REPO_URL, INSTALL_DIR, SERVICE_USER, GO_VERSION
+#   REPO_URL, INSTALL_DIR, SERVICE_USER, GO_VERSION, NODE_VERSION
 #   GRPC_ADDR, HTTP_ADDR, POSTGRES_HOST_PORT, OPENSEARCH_PORT,
 #   NATS_CLIENT_PORT, NATS_MONITOR_PORT
 #   POSTGRES_DSN, OPENSEARCH_URL, NATS_URL (advanced: point at
@@ -46,6 +50,7 @@ set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/xVP2D/SimplySE.git}"
 GO_VERSION="${GO_VERSION:-1.23.4}"
+NODE_VERSION="${NODE_VERSION:-20.18.1}"
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mWARN:\033[0m %s\n' "$*" >&2; }
@@ -155,7 +160,11 @@ install_packages() {
 
 PKG_MANAGER="$(detect_pkg_manager)"
 log "detected package manager: ${PKG_MANAGER}"
-install_packages "$PKG_MANAGER" git curl tar ca-certificates openssl
+# xz(-utils): needed to extract the Node.js tarball below.
+case "$PKG_MANAGER" in
+  apt) install_packages apt git curl tar xz-utils ca-certificates openssl ;;
+  *) install_packages "$PKG_MANAGER" git curl tar xz ca-certificates openssl ;;
+esac
 
 ensure_docker() {
   if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
@@ -216,6 +225,31 @@ EOF
 }
 ensure_go
 export PATH="/usr/local/go/bin:$PATH"
+
+ensure_node() {
+  if command -v npm >/dev/null 2>&1; then
+    log "node already installed: $(node --version)"
+    return
+  fi
+  local arch nodearch
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64) nodearch=x64 ;;
+    aarch64) nodearch=arm64 ;;
+    *) die "no automatic Node install for architecture '${arch}' — install Node >= 20 manually and re-run." ;;
+  esac
+  log "installing Node ${NODE_VERSION} (${nodearch})"
+  curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${nodearch}.tar.xz" -o /tmp/node.tar.xz
+  $SUDO rm -rf /usr/local/node
+  $SUDO mkdir -p /usr/local/node
+  $SUDO tar -C /usr/local/node --strip-components=1 -xJf /tmp/node.tar.xz
+  rm -f /tmp/node.tar.xz
+  $SUDO tee /etc/profile.d/nodejs.sh >/dev/null <<'EOF'
+export PATH="$PATH:/usr/local/node/bin"
+EOF
+}
+ensure_node
+export PATH="/usr/local/node/bin:$PATH"
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then
   log "updating existing checkout in ${INSTALL_DIR}"
@@ -287,6 +321,9 @@ log "starting infra (Postgres, OpenSearch, NATS) via docker compose"
 
 log "building master (this can take a minute the first time)"
 (cd "$INSTALL_DIR/master" && $SUDO env "PATH=$PATH" go build -o bin/master ./cmd/master)
+
+log "building the dashboard (npm install + build — a couple of minutes the first time)"
+(cd "$INSTALL_DIR/frontend" && $SUDO env "PATH=$PATH" npm install --no-fund --no-audit && $SUDO env "PATH=$PATH" npm run build)
 
 POSTGRES_DSN="${POSTGRES_DSN:-postgres://selinux:${POSTGRES_PASSWORD}@localhost:${POSTGRES_HOST_PORT}/selinux?sslmode=disable}"
 {
@@ -360,6 +397,7 @@ cat <<EOF
 Master installed in ${INSTALL_DIR}, running as service
 'selinux-fleet-master' (user ${SERVICE_USER}).
 
+  Dashboard    : http://${MASTER_ADDR_HINT}:${HTTP_ADDR#:}/ (same port as the API)
   Health check : curl http://localhost:${HTTP_ADDR#:}/api/health
   Logs         : journalctl -u selinux-fleet-master -f
   Config       : /etc/selinux-fleet-manager/master.env (then:
