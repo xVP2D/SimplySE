@@ -166,15 +166,19 @@ install_packages() {
 PKG_MANAGER="$(detect_pkg_manager)"
 log "detected package manager: ${PKG_MANAGER}"
 # gcc (a C compiler) is needed to build the `ring` crate (TLS crypto) that
-# tonic/rustls pull in transitively.
+# tonic/rustls pull in transitively. protoc (protobuf compiler) is needed
+# by build.rs (tonic-build/prost-build) to generate the gRPC client from
+# proto/selinux/v1/agent.proto at build time — without it, `cargo build`
+# fails with "Could not find `protoc`" partway through, after already
+# downloading and compiling most other dependencies.
 case "$PKG_MANAGER" in
-  apt) install_packages apt git curl ca-certificates gcc pkg-config ;;
-  dnf) install_packages dnf git curl ca-certificates gcc pkgconf-pkg-config ;;
-  yum) install_packages yum git curl ca-certificates gcc pkgconfig ;;
-  zypper) install_packages zypper git curl ca-certificates gcc pkg-config ;;
-  pacman) install_packages pacman git curl ca-certificates base-devel ;;
-  apk) install_packages apk git curl ca-certificates build-base ;;
-  *) warn "make sure git, curl, and a C compiler (gcc) are installed manually" ;;
+  apt) install_packages apt git curl ca-certificates gcc pkg-config protobuf-compiler ;;
+  dnf) install_packages dnf git curl ca-certificates gcc pkgconf-pkg-config protobuf-compiler ;;
+  yum) install_packages yum git curl ca-certificates gcc pkgconfig protobuf-compiler ;;
+  zypper) install_packages zypper git curl ca-certificates gcc pkg-config protobuf-devel ;;
+  pacman) install_packages pacman git curl ca-certificates base-devel protobuf ;;
+  apk) install_packages apk git curl ca-certificates build-base protobuf ;;
+  *) warn "make sure git, curl, a C compiler (gcc), and protoc (protobuf compiler) are installed manually" ;;
 esac
 
 ensure_rust() {
