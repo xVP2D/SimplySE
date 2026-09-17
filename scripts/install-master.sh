@@ -356,8 +356,15 @@ POSTGRES_DSN="${POSTGRES_DSN:-postgres://selinux:${POSTGRES_PASSWORD}@localhost:
   echo "HTTP_ADDR=${HTTP_ADDR}"
   echo "POSTGRES_DSN=${POSTGRES_DSN}"
   echo "ENROLL_TOKEN=${ENROLL_TOKEN}"
-  [[ -n "${OPENSEARCH_URL:-}" ]] && echo "OPENSEARCH_URL=${OPENSEARCH_URL}"
-  [[ -n "${NATS_URL:-}" ]] && echo "NATS_URL=${NATS_URL}"
+  # `|| true` on both: under `set -e` + `pipefail`, this group's exit
+  # status feeds the pipe below, and a false `[[ ]] && echo` (the normal,
+  # expected case — these are both usually unset) leaves the *group*
+  # exit status at 1 even though nothing actually went wrong, which
+  # pipefail then reports as the whole pipeline having failed, aborting
+  # the script right after `tee` — silently, no error text, since it's
+  # not a "real" failure. Confirmed by reproducing this exact hang.
+  [[ -n "${OPENSEARCH_URL:-}" ]] && echo "OPENSEARCH_URL=${OPENSEARCH_URL}" || true
+  [[ -n "${NATS_URL:-}" ]] && echo "NATS_URL=${NATS_URL}" || true
 } | $SUDO tee /etc/selinux-fleet-manager/master.env >/dev/null
 # Contains the Postgres password inline in the DSN above: systemd's
 # EnvironmentFile is read by the (root) manager process itself, before it
