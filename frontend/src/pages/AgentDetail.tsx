@@ -1,21 +1,30 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, type Agent, type AvcEventHit } from "../lib/api";
+import { api, type Agent, type AvcEventHit, type Command } from "../lib/api";
 import { DeployRuleDialog } from "../components/DeployRuleDialog";
+import { formatPayload, statusTagClass } from "../lib/commandFormat";
 
 export function AgentDetail() {
   const { id } = useParams<{ id: string }>();
   const [agent, setAgent] = useState<Agent | null>(null);
   const [denials, setDenials] = useState<AvcEventHit[]>([]);
+  const [commands, setCommands] = useState<Command[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [expandedDenial, setExpandedDenial] = useState<number | null>(null);
+  const [switchingMode, setSwitchingMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
     if (!id) return;
     try {
-      const [detail, denialsResult] = await Promise.all([api.getAgent(id), api.listDenials({ agentId: id, limit: 50 })]);
+      const [detail, denialsResult, commandsResult] = await Promise.all([
+        api.getAgent(id),
+        api.listDenials({ agentId: id, limit: 50 }),
+        api.recentCommands({ agentId: id, limit: 20 }),
+      ]);
       setAgent({ ...detail.agent, connected: detail.connected });
       setDenials(denialsResult.events ?? []);
+      setCommands(commandsResult.commands ?? []);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -28,6 +37,23 @@ export function AgentDetail() {
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  const switchMode = async (mode: "enforcing" | "permissive") => {
+    if (!agent || mode === agent.mode) return;
+    if (!window.confirm(`Passer ${agent.hostname} en mode ${mode} ?`)) return;
+    setSwitchingMode(true);
+    try {
+      await api.deployRule(
+        { name: `Passer en ${mode}`, type: "set_mode", payload_json: JSON.stringify({ mode }), agent_ids: [agent.id] },
+        crypto.randomUUID(),
+      );
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSwitchingMode(false);
+    }
+  };
 
   if (error) return <div style={{ color: "var(--color-accent-300)" }}>{error}</div>;
   if (!agent) return <p style={{ color: "var(--color-neutral-500)" }}>Chargement…</p>;
@@ -68,7 +94,37 @@ export function AgentDetail() {
           <Field label="Adresse" value={agent.ip} />
           <Field label="Statut" value={agent.status} />
           <Field label="OS / noyau" value={`${agent.os_release} / ${agent.kernel_version}`} />
-          <Field label="Mode" value={agent.mode} />
+          <span style={{ display: "flex", flexDirection: "column", gap: 3.5 }}>
+            <span style={{ color: "var(--color-neutral-600)", fontSize: 11 }}>Mode</span>
+            <div className="seg" style={{ width: "fit-content" }}>
+              <label
+                className="seg-opt"
+                style={agent.mode === "enforcing" ? { color: "var(--color-accent)" } : undefined}
+              >
+                <input
+                  type="radio"
+                  name="agent-mode"
+                  disabled={switchingMode}
+                  checked={agent.mode === "enforcing"}
+                  onChange={() => switchMode("enforcing")}
+                />
+                enforcing
+              </label>
+              <label
+                className="seg-opt"
+                style={agent.mode === "permissive" ? { color: "var(--color-accent)" } : undefined}
+              >
+                <input
+                  type="radio"
+                  name="agent-mode"
+                  disabled={switchingMode}
+                  checked={agent.mode === "permissive"}
+                  onChange={() => switchMode("permissive")}
+                />
+                permissive
+              </label>
+            </div>
+          </span>
           <Field label="Politique" value={`${agent.policy_name} ${agent.policy_version}`.trim()} />
           <Field label="Vu la dernière fois" value={agent.last_seen_at ? new Date(agent.last_seen_at).toLocaleString() : "jamais"} />
         </div>
@@ -90,7 +146,73 @@ export function AgentDetail() {
         }}
       >
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-          <h5 style={{ margin: 0, fontSize: 15 }}>Denials récents</h5>
+          <h5 style={{ margin: 0, fontSize: 15 }}>Règles appliquées</h5>
+          <Link to={`/deployments?agent=${agent.id}`} className="btn btn-ghost">
+            Tout voir
+          </Link>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Paramètres</th>
+                <th>Statut</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {commands.map((c) => (
+                <tr key={c.id}>
+                  <td style={{ fontSize: 12, color: "var(--color-neutral-500)", whiteSpace: "nowrap" }}>
+                    {new Date(c.created_at).toLocaleString()}
+                  </td>
+                  <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5, whiteSpace: "nowrap" }}>{c.type}</td>
+                  <td
+                    style={{
+                      fontFamily: "ui-monospace,Menlo,monospace",
+                      fontSize: 12,
+                      color: "var(--color-neutral-400)",
+                      maxWidth: 260,
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {formatPayload(c.payload_json)}
+                  </td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <span className={statusTagClass(c.status)}>{c.status}</span>
+                  </td>
+                  <td style={{ fontSize: 12, color: "var(--color-neutral-500)", maxWidth: 260, wordBreak: "break-word" }}>
+                    {c.result_message}
+                  </td>
+                </tr>
+              ))}
+              {commands.length === 0 && (
+                <tr>
+                  <td colSpan={5} style={{ color: "var(--color-neutral-500)" }}>
+                    Aucune règle déployée sur cet agent pour l'instant.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8.4,
+          padding: 14,
+          borderRadius: 8,
+          background: "var(--color-surface)",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+          <h5 style={{ margin: 0, fontSize: 15 }}>Logs / denials récents</h5>
           <Link to={`/denials?agent=${agent.id}`} className="btn btn-ghost">
             Tout voir
           </Link>
@@ -103,26 +225,51 @@ export function AgentDetail() {
               <th>Source → cible</th>
               <th>Classe / perm</th>
               <th>Commande</th>
+              <th>PID</th>
               <th>Chemin</th>
             </tr>
           </thead>
           <tbody>
             {denials.map((d, i) => (
-              <tr key={i}>
-                <td style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>{new Date(d.timestamp).toLocaleTimeString()}</td>
-                <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12 }}>
-                  {d.scontext} → {d.tcontext}
-                </td>
-                <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, color: "var(--color-neutral-400)" }}>
-                  {d.tclass} · {d.perms.join(",")}
-                </td>
-                <td style={{ fontSize: 12.5 }}>{d.comm}</td>
-                <td style={{ fontSize: 12.5, color: "var(--color-neutral-400)" }}>{d.path}</td>
-              </tr>
+              <>
+                <tr
+                  key={i}
+                  style={{ cursor: "pointer" }}
+                  onClick={() => setExpandedDenial(expandedDenial === i ? null : i)}
+                >
+                  <td style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>{new Date(d.timestamp).toLocaleTimeString()}</td>
+                  <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12 }}>
+                    {d.scontext} → {d.tcontext}
+                  </td>
+                  <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, color: "var(--color-neutral-400)" }}>
+                    {d.tclass} · {d.perms.join(",")}
+                  </td>
+                  <td style={{ fontSize: 12.5 }}>{d.comm}</td>
+                  <td style={{ fontSize: 12, color: "var(--color-neutral-400)" }}>{d.pid}</td>
+                  <td style={{ fontSize: 12.5, color: "var(--color-neutral-400)" }}>{d.path}</td>
+                </tr>
+                {expandedDenial === i && (
+                  <tr key={`${i}-raw`}>
+                    <td
+                      colSpan={6}
+                      style={{
+                        fontFamily: "ui-monospace,Menlo,monospace",
+                        fontSize: 11.5,
+                        color: "var(--color-neutral-400)",
+                        background: "var(--color-neutral-900, rgba(0,0,0,0.15))",
+                        wordBreak: "break-all",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {d.raw_line}
+                    </td>
+                  </tr>
+                )}
+              </>
             ))}
             {denials.length === 0 && (
               <tr>
-                <td colSpan={5} style={{ color: "var(--color-neutral-500)" }}>
+                <td colSpan={6} style={{ color: "var(--color-neutral-500)" }}>
                   Aucun denial observé pour cet agent.
                 </td>
               </tr>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Agent, type Command } from "../lib/api";
+import { formatPayload, statusTagClass } from "../lib/commandFormat";
 
 const PAGE_SIZE = 20;
 
@@ -161,28 +162,4 @@ export function Deployments() {
       </div>
     </div>
   );
-}
-
-function formatPayload(payloadJSON: string): string {
-  try {
-    const obj = JSON.parse(payloadJSON) as Record<string, unknown>;
-    return Object.entries(obj)
-      .map(([k, v]) => `${k}=${v}`)
-      .join(", ");
-  } catch {
-    return payloadJSON;
-  }
-}
-
-function statusTagClass(status: string): string {
-  switch (status) {
-    case "acked":
-      return "tag tag-accent";
-    case "failed":
-      return "tag tag-outline";
-    case "sent":
-      return "tag tag-accent-2";
-    default:
-      return "tag tag-neutral";
-  }
 }
