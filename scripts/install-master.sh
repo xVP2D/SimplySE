@@ -482,6 +482,13 @@ EOF
 # the invoking user, not root.
 $SUDO chgrp "${SERVICE_USER}" "${INSTALL_DIR}/deploy/certs/master.key"
 $SUDO chmod 640 "${INSTALL_DIR}/deploy/certs/master.key"
+# Same reasoning, for the agent identity's private key: GET
+# /api/enroll/agent.key (see internal/api.enroll) reads this file at
+# request time to serve it to install-agent.sh, so the service user
+# needs read access to it too — gen-certs.sh leaves it 600 root-only,
+# same as master.key, and for the same reason (never world-readable).
+$SUDO chgrp "${SERVICE_USER}" "${INSTALL_DIR}/deploy/certs/agent-dev.key"
+$SUDO chmod 640 "${INSTALL_DIR}/deploy/certs/agent-dev.key"
 
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable --now selinux-fleet-master
