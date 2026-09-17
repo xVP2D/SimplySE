@@ -375,6 +375,27 @@ $SUDO chown -R "${SERVICE_USER}:${SERVICE_USER}" "$INSTALL_DIR"
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable --now selinux-fleet-master
 
+# Open only what agents/browsers actually need to reach (gRPC + HTTP
+# API/dashboard). Postgres/OpenSearch/NATS are bound to 127.0.0.1 in
+# docker-compose.yml precisely so they're never candidates for this —
+# defense in depth even if a firewall rule were ever added for them by hand.
+open_firewall_ports() {
+  local http_port="${HTTP_ADDR#:}" grpc_port="${GRPC_ADDR#:}"
+  if command -v firewall-cmd >/dev/null 2>&1 && $SUDO systemctl is-active --quiet firewalld 2>/dev/null; then
+    log "opening ${http_port}/tcp (dashboard/API) and ${grpc_port}/tcp (agent gRPC) in firewalld"
+    $SUDO firewall-cmd --permanent --add-port="${http_port}/tcp" >/dev/null
+    $SUDO firewall-cmd --permanent --add-port="${grpc_port}/tcp" >/dev/null
+    $SUDO firewall-cmd --reload >/dev/null
+  elif command -v ufw >/dev/null 2>&1 && $SUDO ufw status 2>/dev/null | grep -q "^Status: active"; then
+    log "opening ${http_port}/tcp (dashboard/API) and ${grpc_port}/tcp (agent gRPC) in ufw"
+    $SUDO ufw allow "${http_port}/tcp" >/dev/null
+    $SUDO ufw allow "${grpc_port}/tcp" >/dev/null
+  else
+    warn "no active firewalld/ufw detected — if traffic is filtered elsewhere (cloud security group, upstream firewall, ...), make sure ${http_port}/tcp (dashboard/API) and ${grpc_port}/tcp (agent gRPC) are reachable from wherever your browser/agents connect from. Nothing else needs to be: Postgres/OpenSearch/NATS are bound to 127.0.0.1 only."
+  fi
+}
+open_firewall_ports
+
 sleep 2
 if $SUDO systemctl is-active --quiet selinux-fleet-master; then
   log "master is running."

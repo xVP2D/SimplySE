@@ -9,8 +9,11 @@ services:
     command: ["-js", "-sd", "/data/jetstream"]
     restart: unless-stopped
     ports:
-      - "${NATS_CLIENT_PORT:-4222}:4222"
-      - "${NATS_MONITOR_PORT:-8222}:8222"
+      # Bound to localhost only: NATS has no auth configured, and only the
+      # master (on the same host) needs to reach it — never expose this
+      # beyond the host, regardless of what the surrounding firewall allows.
+      - "127.0.0.1:${NATS_CLIENT_PORT:-4222}:4222"
+      - "127.0.0.1:${NATS_MONITOR_PORT:-8222}:8222"
     volumes:
       - natsdata:/data/jetstream
 
@@ -25,9 +28,10 @@ services:
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-selinux}"
       POSTGRES_DB: selinux
     ports:
-      # Overridable: pick a different host port if 5432 is already taken
+      # Bound to localhost only: only the master (same host) should ever
+      # reach Postgres directly. Overridable port, still localhost-only
       # (e.g. POSTGRES_HOST_PORT=5433 docker compose up -d).
-      - "${POSTGRES_HOST_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 
@@ -45,7 +49,9 @@ services:
       # random one instead.
       OPENSEARCH_INITIAL_ADMIN_PASSWORD: "${OPENSEARCH_INITIAL_ADMIN_PASSWORD:-Console-SELinux-Dev-1!}"
     ports:
-      - "${OPENSEARCH_PORT:-9200}:9200"
+      # Bound to localhost only: the security plugin is disabled (see
+      # above), so this must never be reachable beyond the host.
+      - "127.0.0.1:${OPENSEARCH_PORT:-9200}:9200"
     volumes:
       - osdata:/usr/share/opensearch/data
 
