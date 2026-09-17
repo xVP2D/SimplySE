@@ -255,7 +255,12 @@ EOF
 ensure_node
 export PATH="/usr/local/node/bin:$PATH"
 
-if [[ -d "$INSTALL_DIR/.git" ]]; then
+if $SUDO test -d "$INSTALL_DIR/.git"; then
+  # $SUDO, not a bare [[ -d ]]: a previous run chowns INSTALL_DIR to
+  # SERVICE_USER at the end, so the invoking (non-root) user may no
+  # longer have permission to even stat it on a re-run — the plain check
+  # would then wrongly report "doesn't exist" and attempt a fresh clone
+  # into a non-empty directory.
   log "updating existing checkout in ${INSTALL_DIR}"
   $SUDO git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
   $SUDO git -C "$INSTALL_DIR" pull --ff-only

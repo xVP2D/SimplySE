@@ -192,9 +192,16 @@ ensure_rust
 source "$HOME/.cargo/env" 2>/dev/null || true
 export PATH="$HOME/.cargo/bin:$PATH"
 
-if [[ -d "$INSTALL_DIR/.git" ]]; then
+if $SUDO test -d "$INSTALL_DIR/.git"; then
+  # $SUDO, not a bare [[ -d ]]: e.g. a previous run under a different user
+  # (or one that installed as root) may have left INSTALL_DIR unreadable
+  # to the current invoking user, which would make a plain check wrongly
+  # report "doesn't exist" and attempt a fresh clone into a non-empty dir.
   log "updating existing checkout in ${INSTALL_DIR}"
-  git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
+  # $SUDO here too: the actual `pull` below runs as root via $SUDO, so
+  # it's root's global gitconfig that needs safe.directory, not the
+  # invoking user's — otherwise git may refuse with "dubious ownership".
+  $SUDO git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
   $SUDO git -C "$INSTALL_DIR" pull --ff-only
 else
   log "cloning ${REPO_URL} into ${INSTALL_DIR}"
