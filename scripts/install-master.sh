@@ -372,6 +372,17 @@ log "building the dashboard (npm install + build — a couple of minutes the fir
 $SUDO env "PATH=$PATH" npm --prefix "$INSTALL_DIR/frontend" install --no-fund --no-audit
 $SUDO env "PATH=$PATH" npm --prefix "$INSTALL_DIR/frontend" run build
 
+# Re-apply the same permission fix as the self-heal block above, now that
+# the build actually ran: go build/npm run build just created bin/master
+# and frontend/dist fresh, as root, under whatever umask root has — on the
+# same hardened hosts where the self-heal block above matters, a
+# restrictive umask (e.g. 077) affects these newly created files too, and
+# the earlier fix (which ran before they existed) never touched them.
+# Without this, a completely fresh install (nothing to self-heal yet)
+# still hits 203/EXEC on its own freshly built binary.
+$SUDO chmod -R a+rX "$INSTALL_DIR" 2>/dev/null || true
+$SUDO chmod 600 "$INSTALL_DIR"/deploy/certs/*.key 2>/dev/null || true
+
 POSTGRES_DSN="${POSTGRES_DSN:-postgres://selinux:${POSTGRES_PASSWORD}@localhost:${POSTGRES_HOST_PORT}/selinux?sslmode=disable}"
 {
   echo "GRPC_ADDR=${GRPC_ADDR}"
