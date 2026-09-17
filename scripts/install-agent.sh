@@ -2,7 +2,7 @@
 # Console SELinux — agent installer.
 #
 # Usage (download then run — works on any systemd Linux distro):
-#   curl -fsSLO https://raw.githubusercontent.com/<org>/<repo>/main/scripts/install-agent.sh
+#   curl -fsSLO https://raw.githubusercontent.com/xVP2D/SimplySE/main/scripts/install-agent.sh
 #   bash install-agent.sh
 #
 # Run from a real terminal, it asks for the master's address and a couple
@@ -32,7 +32,7 @@
 #   - assumes systemd (see install-master.sh's header for the same note).
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/Granola9025/selinux-fleet-manager.git}"
+REPO_URL="${REPO_URL:-https://github.com/xVP2D/SimplySE.git}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/selinux-fleet-manager}"
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }

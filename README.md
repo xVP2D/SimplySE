@@ -57,21 +57,19 @@ en téléchargeant le script puis en l'exécutant :
 
 ```sh
 # Sur la machine master :
-curl -fsSLO https://raw.githubusercontent.com/Granola9025/selinux-fleet-manager/main/scripts/install-master.sh
+curl -fsSLO https://raw.githubusercontent.com/xVP2D/SimplySE/main/scripts/install-master.sh
 bash install-master.sh
 
 # Sur chaque machine surveillée (après avoir copié les certs — le script
 # master affiche la commande scp exacte à la fin) :
-curl -fsSLO https://raw.githubusercontent.com/Granola9025/selinux-fleet-manager/main/scripts/install-agent.sh
+curl -fsSLO https://raw.githubusercontent.com/xVP2D/SimplySE/main/scripts/install-agent.sh
 MASTER_ADDR=https://<host-du-master>:8443 bash install-agent.sh
 ```
 
-**Ces URLs ne sont pas encore actives** : le dépôt n'a pas été poussé sur
-GitHub (aucun commit ni remote n'existe pour l'instant — c'est
-intentionnel, rien n'a été publié). `REPO_URL` dans les deux scripts pointe
-vers `github.com/Granola9025/selinux-fleet-manager` par anticipation ; à
-ajuster (ou surcharger via la variable d'environnement `REPO_URL`) selon
-l'endroit où vous publiez réellement le code.
+Dépôt : [github.com/xVP2D/SimplySE](https://github.com/xVP2D/SimplySE)
+(public). `REPO_URL` dans les deux scripts pointe vers cette adresse par
+défaut ; surchargez la variable d'environnement `REPO_URL` si vous
+déployez depuis un fork ou un miroir interne.
 
 Ces scripts détectent la distribution (apt/dnf/yum/zypper/pacman/apk),
 installent Go/Rust si absents, compilent depuis les sources, installent un

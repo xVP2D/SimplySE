@@ -2,7 +2,7 @@
 # Console SELinux — master installer.
 #
 # Usage (download then run — works on any systemd Linux distro):
-#   curl -fsSLO https://raw.githubusercontent.com/<org>/<repo>/main/scripts/install-master.sh
+#   curl -fsSLO https://raw.githubusercontent.com/xVP2D/SimplySE/main/scripts/install-master.sh
 #   bash install-master.sh
 #
 # Run from a real terminal, it asks a few questions (install directory,
@@ -38,7 +38,7 @@
 #     SUSE, Arch); Alpine/OpenRC hosts need to run the binary another way.
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/Granola9025/selinux-fleet-manager.git}"
+REPO_URL="${REPO_URL:-https://github.com/xVP2D/SimplySE.git}"
 GO_VERSION="${GO_VERSION:-1.23.4}"
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
