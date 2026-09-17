@@ -102,6 +102,20 @@ remplacée par sa valeur par défaut (ou une erreur explicite pour
 terminal — donc toujours utilisable en automatisation/CI via
 `VAR=... bash install-*.sh`.
 
+**Résilience au crash/redémarrage de la VM** : les services systemd
+(`selinux-fleet-master`/`selinux-fleet-agent`) utilisent `Restart=always` +
+`StartLimitIntervalSec=0` (tentatives de redémarrage illimitées — sans ça,
+le budget par défaut de systemd, 5 essais / 10 s, peut s'épuiser avant
+qu'OpenSearch ait fini de démarrer et laisser le service en échec
+permanent) ; les conteneurs Docker (Postgres/OpenSearch/NATS) ont
+`restart: unless-stopped`, et NATS JetStream persiste maintenant sur un
+volume nommé (`natsdata`, comme `pgdata`/`osdata`) — testé en conditions
+réelles : un message publié avant suppression forcée du conteneur NATS
+(pas juste un restart) est bien retrouvé après recréation. Ceci couvre la
+reprise après crash sur **une seule VM**, pas une vraie haute
+disponibilité multi-nœuds (plusieurs masters, réplication Postgres,
+cluster NATS/OpenSearch) — un chantier d'architecture distinct.
+
 **Gestion des secrets** : `install-master.sh` génère aléatoirement les mots
 de passe Postgres et OpenSearch (`openssl rand`) — jamais de valeur fixe
 committée, jamais demandés à l'opérateur, jamais affichés à l'écran ni dans

@@ -224,6 +224,10 @@ $SUDO tee /etc/systemd/system/selinux-fleet-agent.service >/dev/null <<EOF
 Description=Console SELinux -- agent
 After=network-online.target
 Wants=network-online.target
+# Unlimited restart attempts: keep trying to reach the master indefinitely
+# after a crash/reboot rather than giving up once systemd's default
+# retry budget (5 tries / 10s) is exhausted.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -234,8 +238,8 @@ User=root
 WorkingDirectory=${INSTALL_DIR}
 EnvironmentFile=/etc/selinux-fleet-manager/agent.env
 ExecStart=${INSTALL_DIR}/agent/target/release/selinux-agent
-Restart=on-failure
-RestartSec=3
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

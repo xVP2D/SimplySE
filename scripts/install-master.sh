@@ -310,6 +310,12 @@ $SUDO tee /etc/systemd/system/selinux-fleet-master.service >/dev/null <<EOF
 Description=Console SELinux -- master server
 After=network-online.target docker.service
 Wants=network-online.target
+# Unlimited restart attempts: after a VM crash/reboot, Postgres/OpenSearch
+# inside Docker can take well over systemd's default 10s/5-try budget to
+# become reachable (OpenSearch's JVM start alone can take 15-30s+) —
+# without this, the default budget would exhaust and leave the unit
+# permanently "failed" instead of recovering once dependencies are up.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -317,8 +323,8 @@ User=${SERVICE_USER}
 WorkingDirectory=${INSTALL_DIR}
 EnvironmentFile=-/etc/selinux-fleet-manager/master.env
 ExecStart=${INSTALL_DIR}/master/bin/master
-Restart=on-failure
-RestartSec=2
+Restart=always
+RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
