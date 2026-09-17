@@ -1,0 +1,49 @@
+name: console-selinux
+
+services:
+  nats:
+    image: nats:2.10-alpine
+    command: ["-js"]
+    restart: unless-stopped
+    ports:
+      - "${NATS_CLIENT_PORT:-4222}:4222"
+      - "${NATS_MONITOR_PORT:-8222}:8222"
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: selinux
+      # Dev-only fallback for `make infra-up`; scripts/install-master.sh
+      # always generates and passes a real random one instead — never
+      # commit a real value here.
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-selinux}"
+      POSTGRES_DB: selinux
+    ports:
+      # Overridable: pick a different host port if 5432 is already taken
+      # (e.g. POSTGRES_HOST_PORT=5433 docker compose up -d).
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  opensearch:
+    image: opensearchproject/opensearch:2.17.0
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      plugins.security.disabled: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+      # Required by the image's setup script even with the security plugin
+      # disabled (OpenSearch >= 2.12); irrelevant to actual access control
+      # here since that plugin is off. Dev-only fallback for `make
+      # infra-up`; scripts/install-master.sh always generates a real
+      # random one instead.
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: "${OPENSEARCH_INITIAL_ADMIN_PASSWORD:-Console-SELinux-Dev-1!}"
+    ports:
+      - "${OPENSEARCH_PORT:-9200}:9200"
+    volumes:
+      - osdata:/usr/share/opensearch/data
+
+volumes:
+  pgdata:
+  osdata:

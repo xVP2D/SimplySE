@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package selinux.v1;
+
+option go_package = "console-selinux/master/internal/gen/selinuxv1;selinuxv1";
+
+// AgentLink is the single persistent bidirectional channel between an
+// agent and the master. One stream per connected agent multiplexes
+// heartbeats, AVC events, commands and command acknowledgements.
+//
+// Named Session rather than Connect: generated clients already expose a
+// `connect(dst)` associated function to dial the channel itself, and a
+// same-named RPC method collides with it.
+service AgentLink {
+  rpc Session(stream AgentMessage) returns (stream ServerMessage);
+}
+
+// ---- agent -> master ----
+
+message AgentMessage {
+  oneof payload {
+    EnrollInfo enroll = 1;
+    Heartbeat heartbeat = 2;
+    AvcEvent avc_event = 3;
+    CommandAck ack = 4;
+  }
+}
+
+// Sent once, as the first message on a newly opened stream.
+message EnrollInfo {
+  string agent_id = 1;
+  string hostname = 2;
+  string os_release = 3;
+  string kernel_version = 4;
+  string agent_version = 5;
+}
+
+message Heartbeat {
+  string agent_id = 1;
+  int64 ts_unix = 2;
+  string mode = 3;            // enforcing | permissive | disabled
+  string policy_name = 4;     // e.g. targeted
+  string policy_version = 5;
+}
+
+message AvcEvent {
+  string agent_id = 1;
+  int64 ts_unix = 2;
+  string scontext = 3;
+  string tcontext = 4;
+  string tclass = 5;
+  repeated string perms = 6;
+  string comm = 7;
+  string path = 8;
+  string pid = 9;
+  string raw_line = 10;
+}
+
+message CommandAck {
+  string command_id = 1;
+  bool success = 2;
+  string message = 3;
+}
+
+// ---- master -> agent ----
+
+message ServerMessage {
+  oneof payload {
+    Command command = 1;
+    HeartbeatAck heartbeat_ack = 2;
+  }
+}
+
+message Command {
+  string command_id = 1;
+  CommandType type = 2;
+  string payload_json = 3;
+}
+
+enum CommandType {
+  COMMAND_TYPE_UNSPECIFIED = 0;
+  COMMAND_TYPE_SET_MODE = 1;      // payload: {"mode":"enforcing|permissive"}
+  COMMAND_TYPE_SET_BOOLEAN = 2;   // payload: {"name":"...","value":true}
+  COMMAND_TYPE_INSTALL_MODULE = 3; // payload: {"name":"...","content_base64":"..."}
+  // payload: {"path":"...","type":"httpd_sys_content_t","recursive":false}
+  // or       {"path":"...","context":"system_u:object_r:httpd_sys_content_t:s0","recursive":false}
+  // "context" (full context) wins if both are set.
+  COMMAND_TYPE_CHCON = 4;
+}
+
+message HeartbeatAck {
+  int64 server_ts_unix = 1;
+}
