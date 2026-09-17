@@ -12,14 +12,20 @@
 # stdin isn't a terminal — e.g. CI, or a piped `curl ... | bash`. Re-running
 # is safe: it updates the checkout, rebuilds, and restarts the service.
 #
-# Secrets (Postgres and OpenSearch passwords): generated with `openssl
-# rand`, never prompted for, never printed, never committed anywhere in
-# this repo. They're written once to /etc/selinux-fleet-manager/secrets.env
-# (mode 600, root-only) and to the systemd unit's env file (also 600) —
-# systemd itself reads that file as root before dropping to the service
-# user, so 600 root-only is enough even though the service runs unprivileged.
-# Set POSTGRES_PASSWORD / OPENSEARCH_INITIAL_ADMIN_PASSWORD yourself before
-# running this script if you'd rather supply your own (e.g. from a vault).
+# Secrets (Postgres/OpenSearch passwords, agent enrollment token):
+# generated with `openssl rand`, never prompted for, never printed, never
+# committed anywhere in this repo. They're written once to
+# /etc/selinux-fleet-manager/secrets.env (mode 600, root-only) and to the
+# systemd unit's env file (also 600) — systemd itself reads that file as
+# root before dropping to the service user, so 600 root-only is enough
+# even though the service runs unprivileged. Set POSTGRES_PASSWORD /
+# OPENSEARCH_INITIAL_ADMIN_PASSWORD / ENROLL_TOKEN yourself before running
+# this script if you'd rather supply your own (e.g. from a vault).
+#
+# Agent enrollment: at the end of a successful run, this script prints a
+# ready-to-run install-agent.sh command (with MASTER_ADDR and ENROLL_TOKEN
+# filled in) — install-agent.sh uses that token to fetch the shared agent
+# mTLS identity from GET /api/enroll automatically, no manual cert copying.
 #
 # Environment variables (all optional — see prompts above for the
 # interactive equivalent of each):
@@ -28,12 +34,12 @@
 #   NATS_CLIENT_PORT, NATS_MONITOR_PORT
 #   POSTGRES_DSN, OPENSEARCH_URL, NATS_URL (advanced: point at
 #   already-running infra instead of the bundled docker compose stack)
-#   POSTGRES_PASSWORD, OPENSEARCH_INITIAL_ADMIN_PASSWORD
+#   POSTGRES_PASSWORD, OPENSEARCH_INITIAL_ADMIN_PASSWORD, ENROLL_TOKEN
 #
 # What this does NOT do (known limitations, see README.md):
-#   - it generates a single shared dev-style mTLS CA/cert for all agents,
-#     not a per-agent enrollment flow — fine to start with, replace before
-#     running this at real scale;
+#   - the enrollment token grants the *same* shared identity to every
+#     agent that presents it — it is not a per-agent enrollment/issuance
+#     flow, just automation of copying one dev-style shared cert;
 #   - it assumes systemd (present on Debian/Ubuntu, RHEL/Fedora/CentOS,
 #     SUSE, Arch); Alpine/OpenRC hosts need to run the binary another way.
 set -euo pipefail
@@ -224,15 +230,20 @@ if [[ -f "$SECRETS_FILE" ]]; then
     export "${key}=${value}"
   done < <($SUDO cat "$SECRETS_FILE")
 else
-  log "generating Postgres and OpenSearch passwords"
+  log "generating Postgres/OpenSearch passwords and an agent enrollment token"
   : "${POSTGRES_PASSWORD:=$(openssl rand -hex 24)}"
   # OpenSearch's setup script enforces a complexity policy (upper + lower
   # + digit + special); a plain hex string can fail it, hence the fixed
   # prefix plus random suffix rather than openssl rand alone.
   : "${OPENSEARCH_INITIAL_ADMIN_PASSWORD:=Aa1!$(openssl rand -hex 16)}"
+  # Bearer token gating GET /api/enroll (see internal/api.enroll) — lets
+  # install-agent.sh fetch the shared agent cert automatically instead of
+  # the operator scp-ing it by hand.
+  : "${ENROLL_TOKEN:=$(openssl rand -hex 32)}"
   {
     echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
     echo "OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD}"
+    echo "ENROLL_TOKEN=${ENROLL_TOKEN}"
   } | $SUDO tee "$SECRETS_FILE" >/dev/null
   $SUDO chmod 600 "$SECRETS_FILE"
   $SUDO chown root:root "$SECRETS_FILE"
@@ -260,6 +271,7 @@ POSTGRES_DSN="${POSTGRES_DSN:-postgres://selinux:${POSTGRES_PASSWORD}@localhost:
   echo "GRPC_ADDR=${GRPC_ADDR}"
   echo "HTTP_ADDR=${HTTP_ADDR}"
   echo "POSTGRES_DSN=${POSTGRES_DSN}"
+  echo "ENROLL_TOKEN=${ENROLL_TOKEN}"
   [[ -n "${OPENSEARCH_URL:-}" ]] && echo "OPENSEARCH_URL=${OPENSEARCH_URL}"
   [[ -n "${NATS_URL:-}" ]] && echo "NATS_URL=${NATS_URL}"
 } | $SUDO tee /etc/selinux-fleet-manager/master.env >/dev/null
@@ -305,6 +317,15 @@ else
   warn "master did not start cleanly — check: journalctl -u selinux-fleet-master -e"
 fi
 
+DETECTED_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+if [[ -n "$DETECTED_IP" ]]; then
+  MASTER_ADDR_HINT="$DETECTED_IP"
+  MASTER_ADDR_NOTE="${DETECTED_IP} is this host's detected primary IP; replace it if agents reach this master through a different address instead (a public DNS name, a NAT'd/floating IP, ...)."
+else
+  MASTER_ADDR_HINT="<master-address>"
+  MASTER_ADDR_NOTE="could not auto-detect this host's IP; replace <master-address> with one agents can reach this host on."
+fi
+
 cat <<EOF
 
 --------------------------------------------------------------------
@@ -320,13 +341,18 @@ Master installed in ${INSTALL_DIR}, running as service
                  not printed here; 'sudo cat' it if you need one, e.g.
                  to run psql by hand)
 
-To enroll an agent, copy these 3 files to it (dev-style shared cert —
-see this script's header comment) before running install-agent.sh there:
+To enroll an agent, run these 2 commands on the agent host (no manual
+cert copying needed — install-agent.sh fetches them automatically from
+this master using the enrollment token below):
 
-  scp ${INSTALL_DIR}/deploy/certs/{ca.crt,agent-dev.crt,agent-dev.key} <user>@<agent-host>:/tmp/
-  # then on the agent host:
-  sudo mkdir -p /etc/selinux-fleet-manager/certs
-  sudo mv /tmp/{ca.crt,agent-dev.crt,agent-dev.key} /etc/selinux-fleet-manager/certs/
-  sudo chmod 600 /etc/selinux-fleet-manager/certs/agent-dev.key
+  curl -fsSLO https://raw.githubusercontent.com/xVP2D/SimplySE/main/scripts/install-agent.sh
+  MASTER_ADDR=https://${MASTER_ADDR_HINT}:${GRPC_ADDR#:} ENROLL_TOKEN=${ENROLL_TOKEN} bash install-agent.sh
+
+  (${MASTER_ADDR_NOTE})
+
+Enrollment is gated by ENROLL_TOKEN alone (see /etc/selinux-fleet-manager/
+secrets.env) — treat it like a password: anyone with it can obtain the
+shared agent identity. Known simplification (see README.md): this token
+grants the *same* identity to every agent, it does not issue one per agent.
 --------------------------------------------------------------------
 EOF

@@ -60,11 +60,26 @@ en téléchargeant le script puis en l'exécutant :
 curl -fsSLO https://raw.githubusercontent.com/xVP2D/SimplySE/main/scripts/install-master.sh
 bash install-master.sh
 
-# Sur chaque machine surveillée (après avoir copié les certs — le script
-# master affiche la commande scp exacte à la fin) :
+# Sur chaque machine surveillée (agent) : install-master.sh affiche à la
+# fin la commande ci-dessous déjà complétée (MASTER_ADDR + ENROLL_TOKEN) —
+# les 3 certificats sont récupérés automatiquement depuis le master, sans
+# copie manuelle :
 curl -fsSLO https://raw.githubusercontent.com/xVP2D/SimplySE/main/scripts/install-agent.sh
-MASTER_ADDR=https://<host-du-master>:8443 bash install-agent.sh
+MASTER_ADDR=https://<host-du-master>:8443 ENROLL_TOKEN=<jeton-affiché-par-install-master.sh> bash install-agent.sh
 ```
+
+**Enrôlement automatique** : le master expose `GET /api/enroll/{ca.crt,agent.crt,agent.key}`
+(texte brut, un fichier par requête — pas de JSON à parser côté script),
+protégé par un jeton (`ENROLL_TOKEN`) généré aléatoirement à l'installation
+du master et stocké dans `secrets.env` comme les autres secrets.
+`install-agent.sh` dérive l'URL d'enrôlement depuis l'hôte de
+`MASTER_ADDR` (port HTTP de l'API, 8080 par défaut — surchargeable via
+`ENROLL_URL`/`ENROLL_HTTP_PORT`) et écrit les 3 fichiers reçus dans
+`CERT_DIR` avec les permissions correctes. Si les certificats sont déjà
+présents dans `CERT_DIR` (copiés à la main, ou script relancé), ils sont
+réutilisés tels quels et `ENROLL_TOKEN` n'est pas nécessaire. Limite
+connue : le jeton donne accès à une identité mTLS **partagée** par tous les
+agents qui le présentent — ce n'est pas un enrôlement par agent individuel.
 
 Dépôt : [github.com/xVP2D/SimplySE](https://github.com/xVP2D/SimplySE)
 (public). `REPO_URL` dans les deux scripts pointe vers cette adresse par

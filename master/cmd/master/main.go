@@ -37,6 +37,15 @@ type config struct {
 	PostgresDSN   string
 	OpenSearchURL string
 	NatsURL       string
+
+	// Enrollment: lets install-agent.sh fetch the shared agent mTLS
+	// identity automatically instead of the operator scp-ing it by hand.
+	// Empty EnrollToken disables the endpoint entirely. Known
+	// simplification: one shared identity handed to every agent, not
+	// per-agent issuance — see README.md.
+	EnrollToken   string
+	AgentCertFile string
+	AgentKeyFile  string
 }
 
 func loadConfig() config {
@@ -49,6 +58,9 @@ func loadConfig() config {
 		PostgresDSN:   getenv("POSTGRES_DSN", "postgres://selinux:selinux@localhost:5432/selinux?sslmode=disable"),
 		OpenSearchURL: getenv("OPENSEARCH_URL", "http://localhost:9200"),
 		NatsURL:       getenv("NATS_URL", "nats://localhost:4222"),
+		EnrollToken:   getenv("ENROLL_TOKEN", ""),
+		AgentCertFile: getenv("AGENT_CERT_FILE", "deploy/certs/agent-dev.crt"),
+		AgentKeyFile:  getenv("AGENT_KEY_FILE", "deploy/certs/agent-dev.key"),
 	}
 }
 
@@ -160,7 +172,16 @@ func run(log *slog.Logger) error {
 		}
 	}()
 
-	apiHandler := (&api.API{Store: pg, Search: search, Hub: hub, Rules: engine, Log: log}).Handler()
+	if cfg.EnrollToken == "" {
+		log.Warn("ENROLL_TOKEN not set: automatic agent enrollment (GET /api/enroll) is disabled; agents need certs copied by hand")
+	}
+	apiHandler := (&api.API{
+		Store: pg, Search: search, Hub: hub, Rules: engine, Log: log,
+		EnrollToken:   cfg.EnrollToken,
+		EnrollCAFile:  cfg.CAFile,
+		EnrollCrtFile: cfg.AgentCertFile,
+		EnrollKeyFile: cfg.AgentKeyFile,
+	}).Handler()
 	httpServer := &http.Server{Addr: cfg.HTTPAddr, Handler: apiHandler}
 	go func() {
 		log.Info("http api listening", "addr", cfg.HTTPAddr)

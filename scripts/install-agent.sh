@@ -1,34 +1,43 @@
 #!/usr/bin/env bash
 # Console SELinux — agent installer.
 #
-# Usage (download then run — works on any systemd Linux distro):
+# Usage (download then run — works on any systemd Linux distro): run the
+# command install-master.sh prints at the end of a successful master
+# install (it fills in MASTER_ADDR and ENROLL_TOKEN for you):
 #   curl -fsSLO https://raw.githubusercontent.com/xVP2D/SimplySE/main/scripts/install-agent.sh
-#   bash install-agent.sh
+#   MASTER_ADDR=https://master.example.com:8443 ENROLL_TOKEN=<token> bash install-agent.sh
 #
-# Run from a real terminal, it asks for the master's address and a couple
-# of other choices (agent id, AVC source, where the certs are). Every
-# question is skipped if you already set the matching environment
-# variable, and skipped (defaults used, or a hard error for anything with
-# no safe default like MASTER_ADDR) when stdin isn't a terminal — e.g. a
-# piped `curl ... | bash`. So this also still works non-interactively:
-#   MASTER_ADDR=https://master.example.com:8443 bash install-agent.sh
+# Certs are fetched automatically from the master's enrollment endpoint
+# (GET /api/enroll/*, gated by ENROLL_TOKEN) — no manual scp needed. If
+# ca.crt/agent-dev.crt/agent-dev.key already exist in CERT_DIR (e.g. you
+# copied them yourself, or are re-running this script), those are reused
+# instead and ENROLL_TOKEN isn't needed.
 #
-# Before running this, copy the 3 cert files the master installer
-# generated into /etc/selinux-fleet-manager/certs/ on this host (the
-# master installer prints the exact scp commands at the end of its run).
-# This script tightens their permissions (private key: owner-only) itself,
-# in case the transfer loosened them.
+# Run from a real terminal, it also asks a couple of other questions
+# (agent id, AVC source). Every question is skipped if you already set the
+# matching environment variable, and skipped (defaults used, or a hard
+# error for anything with no safe default like MASTER_ADDR) when stdin
+# isn't a terminal — e.g. a piped `curl ... | bash`.
 #
 # Other overridable environment variables:
-#   REPO_URL       git remote to clone (default: this project's GitHub URL)
-#   INSTALL_DIR    where to clone/build the repo (default: /opt/selinux-fleet-manager)
+#   REPO_URL         git remote to clone (default: this project's GitHub URL)
+#   INSTALL_DIR      where to clone/build the repo (default: /opt/selinux-fleet-manager)
+#   CERT_DIR         where certs are stored (default: /etc/selinux-fleet-manager/certs)
+#   ENROLL_URL       enrollment base URL (default: derived from MASTER_ADDR's
+#                    host, port 8080 — override if that doesn't hold, e.g. a
+#                    reverse proxy fronting the master's HTTP API elsewhere)
+#   ENROLL_HTTP_PORT port to derive ENROLL_URL with, if not overriding it directly (default: 8080)
 #
 # Known limitations (see README.md):
 #   - the agent runs as root: setenforce/setsebool/semodule/chcon each need
 #     root or a broad set of capabilities in practice, so this doesn't try
 #     to carve out a partial-privilege service user;
-#   - the 3 certs above are a single shared dev-style identity for every
-#     agent, not per-agent enrollment;
+#   - the enrollment token grants the *same* shared identity to every
+#     agent, it is not per-agent issuance;
+#   - the enrollment fetch itself is plain HTTP by default (matching the
+#     master's dashboard API) — fine over a trusted/private network; put a
+#     TLS-terminating reverse proxy in front and set ENROLL_URL=https://...
+#     if the network between agent and master isn't trusted;
 #   - assumes systemd (see install-master.sh's header for the same note).
 set -euo pipefail
 
@@ -83,13 +92,46 @@ if ! command -v getenforce >/dev/null 2>&1 && [[ ! -e /etc/selinux/config ]]; th
   warn "the agent will still install, but setenforce/setsebool/semodule/chcon will simply fail here."
 fi
 
-for f in ca.crt agent-dev.crt agent-dev.key; do
-  if [[ ! -f "${CERT_DIR}/${f}" ]]; then
-    die "missing ${CERT_DIR}/${f} — copy the 3 cert files from the master host first (the master installer prints the exact scp command), then re-run."
-  fi
-done
-# Tighten permissions ourselves in case the transfer (scp, a shared
-# folder, ...) left the private key group/world-readable.
+have_certs() {
+  [[ -f "${CERT_DIR}/ca.crt" && -f "${CERT_DIR}/agent-dev.crt" && -f "${CERT_DIR}/agent-dev.key" ]]
+}
+
+if have_certs; then
+  log "using existing certs already in ${CERT_DIR}"
+else
+  prompt ENROLL_TOKEN "Enrollment token (printed at the end of install-master.sh on the master)"
+  : "${ENROLL_TOKEN:?ENROLL_TOKEN is required to fetch certs automatically (or place ca.crt/agent-dev.crt/agent-dev.key in ${CERT_DIR} yourself first and re-run) — set it as an environment variable when running non-interactively.}"
+
+  # Same host as MASTER_ADDR (the gRPC/mTLS port), different port: the
+  # master's plain HTTP dashboard API, where GET /api/enroll/* lives.
+  # Override ENROLL_URL directly if that assumption doesn't hold (e.g. a
+  # reverse proxy terminating TLS on a different host/port).
+  MASTER_HOST="$(printf '%s' "$MASTER_ADDR" | sed -E 's#^[a-zA-Z]+://([^:/]+).*#\1#')"
+  ENROLL_URL="${ENROLL_URL:-http://${MASTER_HOST}:${ENROLL_HTTP_PORT:-8080}/api/enroll}"
+
+  log "fetching agent certs from ${ENROLL_URL}/{ca.crt,agent.crt,agent.key}"
+  $SUDO mkdir -p "$CERT_DIR"
+  TMP_CERT_DIR="$(mktemp -d)"
+  trap 'rm -rf "$TMP_CERT_DIR"' EXIT
+
+  fetch_cert_file() {
+    local remote_name="$1" local_name="$2"
+    curl -fsSL -H "Authorization: Bearer ${ENROLL_TOKEN}" \
+      "${ENROLL_URL}/${remote_name}" -o "${TMP_CERT_DIR}/${local_name}" \
+      || die "failed to fetch ${remote_name} from ${ENROLL_URL} — check MASTER_ADDR/ENROLL_TOKEN, and that the master's HTTP API (default port 8080) is reachable from here."
+  }
+  fetch_cert_file "ca.crt" "ca.crt"
+  fetch_cert_file "agent.crt" "agent-dev.crt"
+  fetch_cert_file "agent.key" "agent-dev.key"
+
+  $SUDO cp "$TMP_CERT_DIR"/* "$CERT_DIR"/
+  rm -rf "$TMP_CERT_DIR"
+  trap - EXIT
+  log "certs written to ${CERT_DIR}"
+fi
+# Tighten permissions ourselves regardless of how the certs got here
+# (fetched just now, or pre-staged by hand — e.g. an scp that left the
+# private key group/world-readable).
 $SUDO chmod 600 "${CERT_DIR}/agent-dev.key"
 $SUDO chmod 644 "${CERT_DIR}/ca.crt" "${CERT_DIR}/agent-dev.crt"
 

@@ -5,6 +5,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -12,7 +13,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 
 	"console-selinux/master/internal/rules"
 	"console-selinux/master/internal/server"
@@ -28,6 +31,17 @@ type API struct {
 	Hub    *server.Hub
 	Rules  *rules.Engine
 	Log    *slog.Logger
+
+	// Enrollment: serves the shared agent mTLS identity to
+	// install-agent.sh over GET /api/enroll, gated by a bearer token so
+	// this cert material isn't handed to anyone who can merely reach this
+	// port. EnrollToken == "" disables the endpoint entirely. Known
+	// simplification: one shared identity for every agent, not per-agent
+	// issuance — see README.md.
+	EnrollToken   string
+	EnrollCAFile  string
+	EnrollCrtFile string
+	EnrollKeyFile string
 }
 
 func (a *API) Routes() *http.ServeMux {
@@ -41,6 +55,7 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/commands/recent", a.listRecentCommands)
 	mux.HandleFunc("GET /api/alerts", a.listAlerts)
 	mux.HandleFunc("POST /api/alerts/{id}/ack", a.acknowledgeAlert)
+	mux.HandleFunc("GET /api/enroll/{file}", a.enroll)
 	mux.HandleFunc("GET /api/health", a.health)
 	return mux
 }
@@ -75,6 +90,68 @@ func writeError(w http.ResponseWriter, status int, err error) {
 
 func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// enrollFileByName maps the {file} path segment of GET /api/enroll/{file}
+// to the local path it should serve — plain text, one file per request,
+// so install-agent.sh can fetch each with a single `curl -o`, no JSON
+// parsing needed on a shell script's part.
+func (a *API) enrollFileByName(name string) string {
+	switch name {
+	case "ca.crt":
+		return a.EnrollCAFile
+	case "agent.crt":
+		return a.EnrollCrtFile
+	case "agent.key":
+		return a.EnrollKeyFile
+	default:
+		return ""
+	}
+}
+
+// enroll serves the shared agent mTLS identity (ca.crt, agent-dev.crt,
+// agent-dev.key, requested as ca.crt/agent.crt/agent.key respectively) so
+// install-agent.sh can fetch it automatically instead of the operator
+// copying files by hand. Gated by a bearer token generated once by
+// install-master.sh (ENROLL_TOKEN) — never logged, compared in constant
+// time to avoid a timing side-channel.
+func (a *API) enroll(w http.ResponseWriter, r *http.Request) {
+	if a.EnrollToken == "" {
+		writeError(w, http.StatusServiceUnavailable, errors.New("enrollment is disabled on this master (no ENROLL_TOKEN configured)"))
+		return
+	}
+
+	token := bearerToken(r)
+	if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(a.EnrollToken)) != 1 {
+		a.Log.Warn("enrollment request rejected: invalid or missing token", "remote_addr", r.RemoteAddr)
+		writeError(w, http.StatusUnauthorized, errors.New("invalid or missing enrollment token"))
+		return
+	}
+
+	path := a.enrollFileByName(r.PathValue("file"))
+	if path == "" {
+		writeError(w, http.StatusNotFound, fmt.Errorf("unknown enrollment file %q (expected ca.crt, agent.crt or agent.key)", r.PathValue("file")))
+		return
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("read %s: %w", r.PathValue("file"), err))
+		return
+	}
+
+	a.Log.Info("agent enrollment file served", "file", r.PathValue("file"), "remote_addr", r.RemoteAddr)
+	w.Header().Set("Content-Type", "application/x-pem-file")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(content)
+}
+
+func bearerToken(r *http.Request) string {
+	const prefix = "Bearer "
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, prefix) {
+		return strings.TrimPrefix(h, prefix)
+	}
+	return r.URL.Query().Get("token")
 }
 
 func (a *API) listAgents(w http.ResponseWriter, r *http.Request) {
