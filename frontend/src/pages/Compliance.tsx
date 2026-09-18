@@ -36,7 +36,7 @@ export function Compliance() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16.8 }}>
-      {error && <div style={{ color: "var(--color-accent-300)", fontSize: 13 }}>{error}</div>}
+      {error && <div style={{ color: "var(--color-danger)", fontSize: 13 }}>{error}</div>}
 
       <div
         style={{
@@ -50,7 +50,7 @@ export function Compliance() {
           maxWidth: 260,
         }}
       >
-        <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--color-accent)" }}>
+        <span style={{ fontSize: 13, fontWeight: 500, color: "var(--color-neutral-400)" }}>
           {t("compliance.fleetCompliance")}
         </span>
         <span style={{ fontFamily: "var(--font-heading)", fontSize: 30, lineHeight: 1 }}>{score} %</span>

@@ -25,6 +25,7 @@ import (
 	"console-selinux/master/internal/certs"
 	"console-selinux/master/internal/correlate"
 	selinuxv1 "console-selinux/master/internal/gen/selinuxv1"
+	"console-selinux/master/internal/history"
 	natsq "console-selinux/master/internal/queue/nats"
 	"console-selinux/master/internal/rules"
 	"console-selinux/master/internal/server"
@@ -47,6 +48,11 @@ type config struct {
 	// deletes it — the knob for "large volume" deployments where keeping
 	// every AVC event forever would eventually fill the disk.
 	OpenSearchAVCRetentionDays int
+
+	// HistoryRetentionDays: how long the permanent history behind the
+	// dashboard's charts (see internal/history) is kept. Unlike the AVC
+	// index it is aggregated, so a year costs very little; 0 keeps it forever.
+	HistoryRetentionDays int
 
 	// Enrollment: lets install-agent.sh fetch the shared agent mTLS
 	// identity automatically instead of the operator scp-ing it by hand.
@@ -79,6 +85,7 @@ func loadConfig() config {
 		FrontendDist:  getenv("FRONTEND_DIST", "frontend/dist"),
 
 		OpenSearchAVCRetentionDays: getenvInt("OPENSEARCH_AVC_RETENTION_DAYS", 30),
+		HistoryRetentionDays:       getenvInt("HISTORY_RETENTION_DAYS", 365),
 	}
 }
 
@@ -137,6 +144,14 @@ func run(log *slog.Logger) error {
 		log.Info("opensearch avc_events retention policy applied", "retention_days", cfg.OpenSearchAVCRetentionDays)
 	}
 
+	// Permanent history for the dashboard's charts. The backfill only counts
+	// events that predate it, so it is safe to retry on every boot and never
+	// fatal: worst case the older part of the history is filled in later.
+	hist := history.NewRecorder(pg, log)
+	if err := history.BackfillDenials(ctx, pg, search, log); err != nil {
+		log.Warn("denial history backfill failed, will retry at next start", "error", err)
+	}
+
 	queue, err := natsq.Connect(ctx, cfg.NatsURL)
 	if err != nil {
 		return err
@@ -146,6 +161,7 @@ func run(log *slog.Logger) error {
 
 	engine := rules.NewEngine()
 	hub := server.NewHub()
+	go hist.Run(ctx, hub, cfg.HistoryRetentionDays)
 	collector := &server.Collector{Store: pg, Search: search, Hub: hub, Log: log}
 	go collector.Run(ctx)
 
@@ -201,7 +217,7 @@ func run(log *slog.Logger) error {
 		// suggestion" at the end of a domain collection
 		// (server.Collector.GenerateSuggestion). Observing a denial here
 		// only ever feeds the alert above and the raw event indexed below.
-		return search.IndexAvcEvent(ctx, opensearch.AvcEvent{
+		if err := search.IndexAvcEvent(ctx, opensearch.AvcEvent{
 			AgentID:  m.AgentID,
 			TsUnix:   m.TsUnix,
 			SContext: m.SContext,
@@ -212,7 +228,13 @@ func run(log *slog.Logger) error {
 			Path:     m.Path,
 			PID:      m.PID,
 			RawLine:  m.RawLine,
-		})
+		}); err != nil {
+			return err
+		}
+		// Counted only once safely indexed: a failed attempt is redelivered
+		// and must not be counted twice.
+		hist.RecordDenial(m.AgentID, m.SContext, m.TContext, m.TClass, m.Perms, m.TsUnix)
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -296,6 +318,8 @@ func run(log *slog.Logger) error {
 		FrontendDist:  cfg.FrontendDist,
 		Correlate:     correlateRegistry,
 		Collector:     collector,
+
+		HistoryRetentionDays: cfg.HistoryRetentionDays,
 	}).Handler()
 	httpServer := &http.Server{Addr: cfg.HTTPAddr, Handler: apiHandler}
 	go func() {

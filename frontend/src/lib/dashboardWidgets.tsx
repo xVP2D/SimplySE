@@ -1,7 +1,12 @@
-import { useRef, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Agent, Alert, Command, TopSignature, TrendPoint } from "./api";
 import type { AgentCompliance } from "./compliance";
+// ECharts is heavy: it is only fetched once a chart tile is actually shown.
+const ChartView = lazy(() => import("../charts/ChartView").then((m) => ({ default: m.ChartView })));
+import { ALL_CHART_IDS, isTileSized } from "../charts/ids";
+import { DEFAULT_CHART } from "../charts/datasets";
+import type { ChartConfig } from "../charts/types";
 
 export type WidgetType =
   | "stat-agents"
@@ -16,7 +21,8 @@ export type WidgetType =
   | "denial-trend"
   | "agents-vignettes"
   | "compliance-checks"
-  | "agents-by-mode";
+  | "agents-by-mode"
+  | "chart";
 
 // Everything the widget grid needs to render any widget instance — fetched
 // once by the Dashboard page (same polling loop as before this became
@@ -101,6 +107,12 @@ export const WIDGET_DEFS: Record<WidgetType, WidgetDef> = {
     defaultSize: { w: 6, h: 6 },
     minSize: { w: 3, h: 4 },
   },
+  chart: {
+    type: "chart",
+    labelKey: "dashboard.widgets.chart",
+    defaultSize: { w: 6, h: 8 },
+    minSize: { w: 2, h: 3 },
+  },
 };
 
 export const WIDGET_CATALOG: WidgetType[] = [
@@ -117,6 +129,7 @@ export const WIDGET_CATALOG: WidgetType[] = [
   "agents-vignettes",
   "compliance-checks",
   "agents-by-mode",
+  "chart",
 ];
 
 // A local widget instance: the grid-agnostic shape used throughout the
@@ -131,6 +144,7 @@ export interface WidgetInstance {
   w: number;
   h: number;
   limit?: number;
+  config?: ChartConfig;
 }
 
 // Mirrors the fixed dashboard exactly as it looked before it became
@@ -168,21 +182,23 @@ const singleLine: React.CSSProperties = { whiteSpace: "nowrap", overflow: "hidde
 
 export function StatCard({ label, value, meta }: { label: string; value: string | number; meta: string }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 5.6, height: "100%", minWidth: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, height: "100%", minWidth: 0 }}>
+      <span style={{ ...singleLine, fontSize: 13, fontWeight: 500, color: "var(--color-neutral-400)" }} title={label}>
+        {label}
+      </span>
       <span
         style={{
           ...singleLine,
-          fontSize: 10,
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          color: "var(--color-accent)",
+          fontSize: 34,
+          lineHeight: 1.1,
+          fontWeight: 600,
+          letterSpacing: "-0.02em",
+          fontVariantNumeric: "tabular-nums",
         }}
-        title={label}
       >
-        {label}
+        {value}
       </span>
-      <span style={{ ...singleLine, fontFamily: "var(--font-heading)", fontSize: 30, lineHeight: 1 }}>{value}</span>
-      <span style={{ ...singleLine, fontSize: 12, color: "var(--color-neutral-500)" }} title={meta}>
+      <span style={{ ...singleLine, fontSize: 12.5, color: "var(--color-neutral-500)" }} title={meta}>
         {meta}
       </span>
     </div>
@@ -196,7 +212,7 @@ export function StatCard({ label, value, meta }: { label: string; value: string 
 function HorizontalBarChart({
   bars,
 }: {
-  bars: { label: string; value: number; total: number; displayValue: string }[];
+  bars: { label: string; value: number; total: number; displayValue: string; color?: string }[];
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 11.2, height: "100%" }}>
@@ -210,8 +226,8 @@ function HorizontalBarChart({
               </span>
               <span style={{ color: "var(--color-neutral-500)", flex: "none" }}>{b.displayValue}</span>
             </div>
-            <div style={{ height: 6, borderRadius: 3, background: "var(--color-divider)", overflow: "hidden" }}>
-              <div style={{ width: `${pct}%`, height: "100%", borderRadius: 3, background: "var(--color-accent)" }} />
+            <div style={{ height: 6, borderRadius: 3, background: "var(--color-sunken)", overflow: "hidden" }}>
+              <div style={{ width: `${pct}%`, height: "100%", borderRadius: 3, background: b.color ?? "var(--color-accent)" }} />
             </div>
           </div>
         );
@@ -226,6 +242,8 @@ function modeTagClass(mode: string): string {
       return "tag tag-accent";
     case "permissive":
       return "tag tag-accent-2";
+    case "disabled":
+      return "tag tag-danger";
     default:
       return "tag tag-neutral";
   }
@@ -379,7 +397,7 @@ function AgentsVignettesGrid({ agents, emptyLabel }: { agents: Agent[]; emptyLab
             gap: 5.6,
             padding: "8.4px 10px",
             borderRadius: 6,
-            background: "color-mix(in srgb, var(--color-text) 5%, transparent)",
+            background: "var(--color-sunken)",
             textDecoration: "none",
             color: "inherit",
           }}
@@ -392,6 +410,7 @@ function AgentsVignettesGrid({ agents, emptyLabel }: { agents: Agent[]; emptyLab
                 borderRadius: "50%",
                 flex: "none",
                 background: a.connected ? "var(--color-accent)" : "var(--color-neutral-600)",
+                boxShadow: a.connected ? "0 0 0 3px color-mix(in srgb, var(--color-accent) 22%, transparent)" : undefined,
               }}
             />
             <span
@@ -521,8 +540,8 @@ export function renderWidgetContent(
             <tbody>
               {rows.map((s) => (
                 <tr key={s.pair + s.class}>
-                  <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5 }}>{s.pair}</td>
-                  <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5, color: "var(--color-neutral-400)" }}>
+                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{s.pair}</td>
+                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, color: "var(--color-neutral-400)" }}>
                     {s.class} · {s.perms}
                   </td>
                   <td style={{ textAlign: "right" }}>{s.count}</td>
@@ -566,7 +585,7 @@ export function renderWidgetContent(
                 }}
               >
                 <span style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
-                  <span style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5 }}>{c.type}</span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{c.type}</span>
                   <span style={{ fontSize: 11, color: "var(--color-neutral-500)" }}>agent {c.agent_id}</span>
                 </span>
                 <span className={statusTagClass(c.status)}>{c.status}</span>
@@ -672,6 +691,18 @@ export function renderWidgetContent(
         body: <HorizontalBarChart bars={bars} />,
       };
     }
+    case "chart": {
+      const config = widget.config ?? DEFAULT_CHART;
+      const known = ALL_CHART_IDS.includes(config.chart);
+      return {
+        title: known ? `${t("charts.types." + config.chart)} (${t("charts.datasets." + config.dataset)})` : t("charts.unknownChart"),
+        body: (
+          <Suspense fallback={<span style={{ color: "var(--color-neutral-500)", fontSize: 13 }}>{t("common.loading")}</span>}>
+            <ChartView config={config} compact={isTileSized(config.chart) || widget.h <= 5} />
+          </Suspense>
+        ),
+      };
+    }
     case "agents-by-mode": {
       const counts = { enforcing: 0, permissive: 0, disabled: 0, unknown: 0 };
       for (const a of agents) {
@@ -679,11 +710,18 @@ export function renderWidgetContent(
         else counts.unknown++;
       }
       const total = agents.length;
+      const modeColor = {
+        enforcing: "var(--color-accent)",
+        permissive: "var(--color-amber)",
+        disabled: "var(--color-danger)",
+        unknown: "var(--color-neutral-600)",
+      } as const;
       const bars = (["enforcing", "permissive", "disabled", "unknown"] as const).map((mode) => ({
         label: mode,
         value: counts[mode],
         total,
         displayValue: String(counts[mode]),
+        color: modeColor[mode],
       }));
       return {
         title: t("dashboard.agentsByModeTitle"),

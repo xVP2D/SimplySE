@@ -166,7 +166,7 @@ export function Suggestions() {
         </span>
       </div>
 
-      {error && <div style={{ color: "var(--color-accent-300)", fontSize: 13 }}>{error}</div>}
+      {error && <div style={{ color: "var(--color-danger)", fontSize: 13 }}>{error}</div>}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8.4 }}>
         {modules.map((m) => (
@@ -184,7 +184,7 @@ export function Suggestions() {
           >
             <div style={{ display: "flex", alignItems: "center", gap: 11.2, cursor: "pointer" }} onClick={() => toggleExpand(m)}>
               <span className={statusTagClass(m.status)}>{t(`suggestions.status.${m.status}`)}</span>
-              <span style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5 }}>{m.module_name}</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{m.module_name}</span>
               <span style={{ fontSize: 12, color: "var(--color-neutral-500)", flex: 1 }}>
                 {m.scontext} → {m.tcontext} ({m.tclass})
               </span>
@@ -197,16 +197,16 @@ export function Suggestions() {
             {expanded === m.id && detail && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8.4, borderTop: "1px solid var(--color-divider)", paddingTop: 8.4 }}>
                 {detail.status === "failed" && (
-                  <p style={{ margin: 0, fontSize: 12.5, color: "var(--color-accent-300)" }}>{detail.error_message}</p>
+                  <p style={{ margin: 0, fontSize: 12.5, color: "var(--color-danger)" }}>{detail.error_message}</p>
                 )}
                 {detail.te_text && (
                   <pre
                     style={{
                       margin: 0,
-                      fontFamily: "ui-monospace,Menlo,monospace",
+                      fontFamily: "var(--font-mono)",
                       fontSize: 12,
                       color: "var(--color-neutral-300)",
-                      background: "var(--color-neutral-900, rgba(0,0,0,0.15))",
+                      background: "var(--color-sunken)",
                       padding: 11.2,
                       borderRadius: 6,
                       maxHeight: 300,

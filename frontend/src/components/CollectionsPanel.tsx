@@ -76,14 +76,14 @@ export function CollectionsPanel({ agentId, refreshKey }: { agentId: string; ref
         borderBottom: "1px solid var(--color-divider)",
       }}
     >
-      <strong style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-neutral-500)" }}>
+      <strong style={{ fontSize: 13, fontWeight: 600, color: "var(--color-neutral-400)" }}>
         {t("collect.panelTitle")}
       </strong>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {collections.map((c) => (
           <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8.4, fontSize: 12.5, flexWrap: "wrap" }}>
             <span className={statusTag(c.status)}>{t(`collect.status.${c.status}`)}</span>
-            <span style={{ fontFamily: "ui-monospace,Menlo,monospace" }}>{c.domain}</span>
+            <span style={{ fontFamily: "var(--font-mono)" }}>{c.domain}</span>
             <span style={{ color: "var(--color-neutral-500)" }}>{new Date(c.started_at).toLocaleString(locale)}</span>
             {c.status === "collecting" && c.ends_at && (
               <span style={{ color: "var(--color-neutral-500)" }}>
@@ -101,7 +101,7 @@ export function CollectionsPanel({ agentId, refreshKey }: { agentId: string; ref
               </Link>
             )}
             {c.status === "failed" && c.message && (
-              <span style={{ color: "var(--color-accent-300)" }}>{c.message}</span>
+              <span style={{ color: "var(--color-danger)" }}>{c.message}</span>
             )}
             {ACTIVE.has(c.status) && (
               <button type="button" className="btn btn-ghost" disabled={busyId === c.id} onClick={() => stop(c.id)}>

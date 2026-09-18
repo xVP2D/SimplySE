@@ -85,6 +85,11 @@ type AvcEvent struct {
 	Path     string   `json:"path"`
 	PID      string   `json:"pid"`
 	RawLine  string   `json:"raw_line"`
+	// IngestedUnix is when the master indexed the event. History counting
+	// (internal/history) is done at ingestion for events that carry it, and
+	// reconstructed once, from the index, for the older ones that don't —
+	// so no event is ever counted twice.
+	IngestedUnix int64 `json:"ingested_unix,omitempty"`
 	// Sig identifies "the same denial" for resolution purposes: source,
 	// target, class, the exact permission set and the path (see Signature).
 	// Set when indexing; never sent to the dashboard.
@@ -103,6 +108,9 @@ func Signature(e AvcEvent) string {
 
 func (s *Store) IndexAvcEvent(ctx context.Context, e AvcEvent) error {
 	e.Sig = Signature(e)
+	if e.IngestedUnix == 0 {
+		e.IngestedUnix = time.Now().Unix()
+	}
 	body, err := json.Marshal(e)
 	if err != nil {
 		return fmt.Errorf("marshal avc event: %w", err)

@@ -27,7 +27,7 @@ function TestResult({ result }: { result: { ok: boolean; error?: string } | null
   const { t } = useTranslation();
   if (!result) return null;
   return (
-    <span style={{ fontSize: 12.5, color: result.ok ? "var(--color-accent)" : "var(--color-accent-300)" }}>
+    <span style={{ fontSize: 12.5, color: result.ok ? "var(--color-accent)" : "var(--color-danger)" }}>
       {result.ok ? t("settings.testOk") : t("settings.testFailed", { error: result.error ?? "" })}
     </span>
   );
@@ -145,7 +145,7 @@ export function Settings() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 11.2, maxWidth: 640 }}>
       <p style={{ margin: 0, fontSize: 12, color: "var(--color-neutral-500)" }}>{t("settings.explainer")}</p>
-      {error && <div style={{ color: "var(--color-accent-300)", fontSize: 13 }}>{error}</div>}
+      {error && <div style={{ color: "var(--color-danger)", fontSize: 13 }}>{error}</div>}
 
       {siem && (
         <div style={card}>

@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { GridLayout, useContainerWidth, type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import { api, type Agent, type Alert, type Command, type TopSignature, type TrendPoint } from "../lib/api";
 import { evaluateFleet, fleetScore } from "../lib/compliance";
 import { useTranslation } from "../i18n";
 import { randomUUID } from "../lib/uuid";
+import { HeaderActions } from "../components/PageActions";
+const ChartConfigDialog = lazy(() => import("../charts/ChartConfigDialog").then((m) => ({ default: m.ChartConfigDialog })));
+import { DEFAULT_CHART, randomChartConfig } from "../charts/datasets";
+import { ALL_CHART_IDS, isTileSized } from "../charts/ids";
 import {
   DEFAULT_WIDGETS,
   WIDGET_CATALOG,
@@ -27,6 +31,7 @@ function WidgetFrame({
   limit,
   onLimitChange,
   onRemove,
+  onConfigure,
   scrollable,
   children,
 }: {
@@ -36,6 +41,7 @@ function WidgetFrame({
   limit?: number;
   onLimitChange?: (n: number) => void;
   onRemove: () => void;
+  onConfigure?: () => void;
   scrollable?: boolean;
   children: React.ReactNode;
 }) {
@@ -47,7 +53,7 @@ function WidgetFrame({
         display: "flex",
         flexDirection: "column",
         gap: 8.4,
-        padding: 14,
+        padding: 16,
         borderRadius: 8,
         background: "var(--color-surface)",
         boxShadow: editMode ? "var(--shadow-md)" : "var(--shadow-sm)",
@@ -58,7 +64,7 @@ function WidgetFrame({
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8.4, minWidth: 0 }}>
           {title ? (
             <h5
-              style={{ margin: 0, fontSize: 15, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+              style={{ margin: 0, fontSize: 14.5, fontWeight: 600, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
               title={title}
             >
               {title}
@@ -79,6 +85,18 @@ function WidgetFrame({
                 style={{ width: 56, minHeight: 26, padding: "2px 6px", fontSize: 12 }}
                 title={t("dashboard.widgetLimitLabel")}
               />
+            )}
+            {editMode && onConfigure && (
+              <button
+                type="button"
+                className="btn btn-icon btn-secondary no-drag"
+                style={{ width: 26, height: 26 }}
+                onClick={onConfigure}
+                title={t("dashboard.configureChart")}
+                aria-label={t("dashboard.configureChart")}
+              >
+                <i className="ph ph-sliders" style={{ fontSize: 13 }} />
+              </button>
             )}
             {editMode && (
               <button
@@ -114,8 +132,12 @@ export function Dashboard() {
   const [layoutLoaded, setLayoutLoaded] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [showCatalog, setShowCatalog] = useState(false);
+  const [configuringId, setConfiguringId] = useState<string | null>(null);
 
   const { width, containerRef, mounted } = useContainerWidth();
+  // The layout as last loaded from / saved to the master. Autosave compares
+  // against it, so merely opening the dashboard never writes anything.
+  const syncedLayout = useRef<string | null>(null);
 
   // Load the saved layout once; an empty result means nothing has been
   // customized yet, so the fixed default layout (mirrors the dashboard as
@@ -126,13 +148,17 @@ export function Dashboard() {
       .getDashboardLayout()
       .then((res) => {
         if (cancelled) return;
-        if (res.widgets && res.widgets.length > 0) {
-          setWidgets(res.widgets.map((w) => ({ ...w, type: w.type as WidgetType })));
-        }
+        const loaded =
+          res.widgets && res.widgets.length > 0
+            ? res.widgets.map((w) => ({ ...w, type: w.type as WidgetType }))
+            : DEFAULT_WIDGETS;
+        syncedLayout.current = JSON.stringify(loaded);
+        setWidgets(loaded);
       })
       .catch(() => {
         // Master unreachable at load time — the poller below will surface
         // the error banner; keep the default layout for now.
+        syncedLayout.current = JSON.stringify(DEFAULT_WIDGETS);
       })
       .finally(() => setLayoutLoaded(true));
     return () => {
@@ -191,12 +217,17 @@ export function Dashboard() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!layoutLoaded) return;
+    const serialized = JSON.stringify(widgets);
+    if (serialized === syncedLayout.current) return;
     setSaveState("saving");
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       api
         .saveDashboardLayout(widgets)
-        .then(() => setSaveState("saved"))
+        .then(() => {
+          syncedLayout.current = serialized;
+          setSaveState("saved");
+        })
         .catch(() => setSaveState("idle"));
     }, SAVE_DEBOUNCE_MS);
     return () => {
@@ -204,6 +235,12 @@ export function Dashboard() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [widgets, layoutLoaded]);
+
+  // On a phone the 12-column grid squeezes every widget unreadably narrow:
+  // below this width the widgets stack in one column, in reading order, and
+  // layout editing (drag / resize) is unavailable.
+  const stacked = mounted && width < 720;
+  const stackedWidgets = [...widgets].sort((a, b) => a.y - b.y || a.x - b.x);
 
   const layout: Layout = useMemo(
     () =>
@@ -231,61 +268,121 @@ export function Dashboard() {
   const addWidget = (type: WidgetType) => {
     const def = WIDGET_DEFS[type];
     const maxY = widgets.reduce((m, w) => Math.max(m, w.y + w.h), 0);
+    const id = randomUUID();
     setWidgets((prev) => [
       ...prev,
       {
-        id: randomUUID(),
+        id,
         type,
         x: 0,
         y: maxY,
         w: def.defaultSize.w,
         h: def.defaultSize.h,
         limit: def.hasLimit ? def.defaultLimit : undefined,
+        config: type === "chart" ? DEFAULT_CHART : undefined,
       },
     ]);
     setShowCatalog(false);
+    // a new chart tile opens straight on the gallery: an empty default would
+    // be the least useful thing to show
+    if (type === "chart") setConfiguringId(id);
   };
 
-  // A random dashboard: a random subset of the catalog in random order,
-  // each with a random size around its default, packed left-to-right in
-  // rows (wrapping when a widget no longer fits in the 12 columns) so no
-  // two widgets can overlap.
+  // A random dashboard that fills exactly one screen: the rows that fit
+  // between the top of the grid and the bottom of the window are split, at
+  // random, into cells that tile the whole 12-column area with no gap or
+  // overlap; each cell then gets a widget that fits its size (small cells
+  // get number tiles, large ones lists and charts), preferring types not
+  // already used.
   const randomizeLayout = () => {
     const randomInt = (min: number, max: number) => min + Math.floor(Math.random() * (max - min + 1));
-    const shuffled = [...WIDGET_CATALOG];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    const chosen = shuffled.slice(0, randomInt(5, WIDGET_CATALOG.length));
-
-    let cursorX = 0;
-    let cursorY = 0;
-    let rowHeight = 0;
-    const next: WidgetInstance[] = chosen.map((type) => {
-      const def = WIDGET_DEFS[type];
-      const w = Math.min(GRID_COLS, randomInt(def.minSize.w, Math.max(def.minSize.w, def.defaultSize.w + 2)));
-      const h = randomInt(def.minSize.h, def.defaultSize.h + 2);
-      if (cursorX + w > GRID_COLS) {
-        cursorX = 0;
-        cursorY += rowHeight;
-        rowHeight = 0;
+    const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+    const shuffle = <T,>(items: T[]): T[] => {
+      const a = [...items];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
       }
-      const widget: WidgetInstance = {
-        id: randomUUID(),
-        type,
-        x: cursorX,
-        y: cursorY,
-        w,
-        h,
-        limit: def.hasLimit ? randomInt(3, 20) : undefined,
-      };
-      cursorX += w;
-      rowHeight = Math.max(rowHeight, h);
-      return widget;
-    });
+      return a;
+    };
 
-    setWidgets(next);
+    window.scrollTo({ top: 0 });
+    const gridTop = containerRef.current?.getBoundingClientRect().top ?? 180;
+    const available = window.innerHeight - gridTop - 56;
+    const rows = clamp(Math.floor((available + MARGIN[1]) / (ROW_HEIGHT + MARGIN[1])), 9, 28);
+
+    type Cell = { x: number; y: number; w: number; h: number };
+    const MIN = 3;
+    const cells: Cell[] = [{ x: 0, y: 0, w: GRID_COLS, h: rows }];
+    const target = randomInt(6, 9);
+    const middle = (size: number) => Math.round((randomInt(MIN, size - MIN) + randomInt(MIN, size - MIN)) / 2);
+    while (cells.length < target) {
+      const splittable = cells.filter((c) => c.w >= 2 * MIN || c.h >= 2 * MIN);
+      if (splittable.length === 0) break;
+      splittable.sort((a, b) => b.w * b.h - a.w * a.h);
+      const cell = Math.random() < 0.7 ? splittable[0] : splittable[randomInt(0, splittable.length - 1)];
+      const canCutWidth = cell.w >= 2 * MIN;
+      const canCutHeight = cell.h >= 2 * MIN;
+      // Cut the visually longer side (a column is ~100px wide, a row ~43px tall).
+      const longerIsWidth = cell.w * 100 >= cell.h * (ROW_HEIGHT + MARGIN[1]);
+      const cutWidth = canCutWidth && (!canCutHeight || (longerIsWidth ? Math.random() < 0.8 : Math.random() < 0.2));
+      cells.splice(cells.indexOf(cell), 1);
+      if (cutWidth) {
+        const a = middle(cell.w);
+        cells.push({ ...cell, w: a }, { ...cell, x: cell.x + a, w: cell.w - a });
+      } else {
+        const a = middle(cell.h);
+        cells.push({ ...cell, h: a }, { ...cell, y: cell.y + a, h: cell.h - a });
+      }
+    }
+
+    const statTypes = shuffle(WIDGET_CATALOG.filter((type) => type.startsWith("stat-")));
+    const panelTypes = shuffle(WIDGET_CATALOG.filter((type) => !type.startsWith("stat-") && type !== "chart"));
+    const used = new Set<WidgetType>();
+    const fits = (type: WidgetType, c: Cell) => c.w >= WIDGET_DEFS[type].minSize.w && c.h >= WIDGET_DEFS[type].minSize.h;
+    const pick = (pools: WidgetType[][], c: Cell): WidgetType => {
+      for (const pool of pools) {
+        const type = pool.find((t) => !used.has(t) && fits(t, c));
+        if (type) return type;
+      }
+      return shuffle(WIDGET_CATALOG).find((t) => fits(t, c)) ?? "stat-agents";
+    };
+    const limitFor = (type: WidgetType, c: Cell): number | undefined => {
+      if (!WIDGET_DEFS[type].hasLimit) return undefined;
+      const heightPx = c.h * (ROW_HEIGHT + MARGIN[1]) - 75;
+      if (type === "agents-vignettes") {
+        const perRow = Math.max(1, Math.floor((c.w * 100 - 32) / 136));
+        return clamp(perRow * Math.max(1, Math.floor(heightPx / 72)), 2, 50);
+      }
+      return clamp(Math.floor(heightPx / 38), 2, 50);
+    };
+
+    // About half the cells become a chart tile: KPI-style types for the
+    // small ones, any other family for the larger ones.
+    const kpiCharts = ALL_CHART_IDS.filter((id) => isTileSized(id));
+    const bigCharts = ALL_CHART_IDS.filter((id) => !isTileSized(id));
+    const assigned = new Map<Cell, WidgetType>();
+    const chartConfigs = new Map<Cell, ReturnType<typeof randomChartConfig>>();
+    for (const cell of [...cells].sort((a, b) => b.w * b.h - a.w * a.h)) {
+      if (Math.random() < 0.5) {
+        const small = cell.h <= 4 || cell.w <= 3;
+        const pool = small ? kpiCharts : bigCharts;
+        assigned.set(cell, "chart");
+        chartConfigs.set(cell, randomChartConfig(pool[randomInt(0, pool.length - 1)]));
+        continue;
+      }
+      const preferTile = cell.h <= 4 || cell.w * cell.h <= 18 || Math.random() < 0.15;
+      const type = pick(preferTile ? [statTypes, panelTypes] : [panelTypes, statTypes], cell);
+      used.add(type);
+      assigned.set(cell, type);
+    }
+
+    setWidgets(
+      cells.map((cell) => {
+        const type = assigned.get(cell) as WidgetType;
+        return { id: randomUUID(), type, x: cell.x, y: cell.y, w: cell.w, h: cell.h, limit: limitFor(type, cell), config: chartConfigs.get(cell) };
+      }),
+    );
     setShowCatalog(false);
   };
 
@@ -297,12 +394,13 @@ export function Dashboard() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16.8 }}>
       {error && (
-        <div style={{ color: "var(--color-accent-300)", fontSize: 13 }}>
+        <div style={{ color: "var(--color-danger)", fontSize: 13 }}>
           {t("dashboard.masterUnreachable", { error })}
         </div>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8.4 }}>
+      {!stacked && (
+      <HeaderActions>
         {editMode && (
           <>
             <span style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>
@@ -324,7 +422,9 @@ export function Dashboard() {
                     zIndex: 10,
                     display: "flex",
                     flexDirection: "column",
-                    minWidth: 220,
+                    minWidth: 240,
+                    maxHeight: "60vh",
+                    overflowY: "auto",
                     padding: 6,
                     borderRadius: 8,
                     background: "var(--color-surface)",
@@ -358,14 +458,30 @@ export function Dashboard() {
           <i className={`ph ${editMode ? "ph-check" : "ph-sliders-horizontal"}`} />
           {editMode ? t("dashboard.doneCustomizing") : t("dashboard.customize")}
         </button>
-      </div>
+      </HeaderActions>
+      )}
 
       <div ref={containerRef as React.RefObject<HTMLDivElement>}>
-        {mounted && (
+        {stacked && (
+          <div style={{ display: "flex", flexDirection: "column", gap: MARGIN[1] }}>
+            {stackedWidgets.map((w) => {
+              const { title, body, headerAction, scrollable } = renderWidgetContent(w, data, t, locale);
+              const rows = Math.max(WIDGET_DEFS[w.type].minSize.h, w.h);
+              return (
+                <div key={w.id} style={{ height: rows * ROW_HEIGHT + (rows - 1) * MARGIN[1] }}>
+                  <WidgetFrame editMode={false} title={title} headerAction={headerAction} onRemove={() => undefined} scrollable={scrollable}>
+                    {body}
+                  </WidgetFrame>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {mounted && !stacked && (
           <GridLayout
             width={width}
             layout={layout}
-            gridConfig={{ cols: GRID_COLS, rowHeight: ROW_HEIGHT, margin: MARGIN }}
+            gridConfig={{ cols: GRID_COLS, rowHeight: ROW_HEIGHT, margin: MARGIN, containerPadding: [0, 0] }}
             dragConfig={{ enabled: editMode, cancel: "button, input, select, a, .no-drag" }}
             resizeConfig={{ enabled: editMode }}
             onLayoutChange={handleLayoutChange}
@@ -383,6 +499,7 @@ export function Dashboard() {
                     limit={def.hasLimit ? w.limit ?? def.defaultLimit : undefined}
                     onLimitChange={def.hasLimit ? (n) => setWidgetLimit(w.id, n) : undefined}
                     onRemove={() => removeWidget(w.id)}
+                    onConfigure={w.type === "chart" ? () => setConfiguringId(w.id) : undefined}
                     scrollable={scrollable}
                   >
                     {body}
@@ -393,6 +510,24 @@ export function Dashboard() {
           </GridLayout>
         )}
       </div>
+
+      {configuringId &&
+        (() => {
+          const target = widgets.find((x) => x.id === configuringId);
+          if (!target) return null;
+          return (
+            <Suspense fallback={null}>
+              <ChartConfigDialog
+                config={target.config ?? DEFAULT_CHART}
+                onApply={(cfg) => {
+                  setWidgets((prev) => prev.map((x) => (x.id === target.id ? { ...x, config: cfg } : x)));
+                  setConfiguringId(null);
+                }}
+                onClose={() => setConfiguringId(null)}
+              />
+            </Suspense>
+          );
+        })()}
     </div>
   );
 }

@@ -118,7 +118,7 @@ export function Matrix() {
         </div>
         <p style={{ margin: 0, fontSize: 12, color: "var(--color-neutral-500)" }}>{t("matrix.explainer")}</p>
 
-        {error && <div style={{ color: "var(--color-accent-300)", fontSize: 13 }}>{error}</div>}
+        {error && <div style={{ color: "var(--color-danger)", fontSize: 13 }}>{error}</div>}
 
         <div style={{ overflowX: "auto" }}>
           <table className="table">
@@ -134,7 +134,7 @@ export function Matrix() {
             <tbody>
               {rows.map((row, i) => (
                 <tr key={i}>
-                  <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12 }}>
+                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
                     <div>
                       {row.scontext} → {row.tcontext}
                     </div>
@@ -142,7 +142,7 @@ export function Matrix() {
                       {explainDenial(row, locale)}
                     </div>
                   </td>
-                  <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, color: "var(--color-neutral-400)" }}>
+                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--color-neutral-400)" }}>
                     {row.tclass} · {row.perms.join(",")}
                   </td>
                   <td style={{ textAlign: "right" }}>{row.count}</td>

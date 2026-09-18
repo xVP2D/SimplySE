@@ -65,6 +65,10 @@ type API struct {
 
 	// Collector runs "collect every denial of a domain" (may be nil).
 	Collector *server.Collector
+
+	// HistoryRetentionDays is reported by GET /api/history so the dashboard
+	// can state how long the permanent history is kept (0 = forever).
+	HistoryRetentionDays int
 }
 
 func (a *API) Routes() *http.ServeMux {
@@ -74,6 +78,8 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/agents/{id}/selinux", a.getAgentSelinux)
 	mux.HandleFunc("GET /api/agents/{id}/correlate", a.correlateAgent)
 	mux.HandleFunc("GET /api/correlate/sources", a.correlateSources)
+	mux.HandleFunc("GET /api/history", a.getHistoryStatus)
+	mux.HandleFunc("GET /api/history/{dataset}", a.getHistory)
 	mux.HandleFunc("GET /api/dashboard", a.getDashboardLayout)
 	mux.HandleFunc("PUT /api/dashboard", a.putDashboardLayout)
 	mux.HandleFunc("GET /api/integrations", a.getIntegrations)

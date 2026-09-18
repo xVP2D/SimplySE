@@ -1,3 +1,5 @@
+import type { ChartConfig } from "../charts/types";
+
 export interface Agent {
   id: string;
   hostname: string;
@@ -206,6 +208,7 @@ export interface DashboardWidget {
   w: number;
   h: number;
   limit?: number;
+  config?: ChartConfig;
 }
 
 export interface DashboardLayout {

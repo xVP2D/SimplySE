@@ -64,7 +64,7 @@ export function Agents() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 11.2 }}>
-      {error && <div style={{ color: "var(--color-accent-300)", fontSize: 13 }}>{error}</div>}
+      {error && <div style={{ color: "var(--color-danger)", fontSize: 13 }}>{error}</div>}
 
       <div
         style={{
@@ -136,7 +136,7 @@ export function Agents() {
                     }}
                   />
                   <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.25 }}>
-                    <span style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 13 }}>{a.hostname}</span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 13 }}>{a.hostname}</span>
                     <span style={{ fontSize: 11, color: "var(--color-neutral-600)" }}>{a.ip}</span>
                   </span>
                 </Link>

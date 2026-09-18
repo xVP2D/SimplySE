@@ -354,6 +354,44 @@ et l'id sont validés (seuls les documents `avc_events[-YYYY.MM.dd]` sont
 atteignables). Ne touche pas le compteur « signatures les plus fréquentes » du
 dashboard, qui vient des compteurs en mémoire du moteur de règles.
 
+## Historique permanent et graphiques
+
+Les pages Denials, Déploiements et Alertes montrent l'état *actuel* : un denial
+qu'une règle autorise est masqué, un déploiement ou une alerte peut être
+supprimé de sa liste, et OpenSearch supprime ses index au bout de
+`OPENSEARCH_AVC_RETENTION_DAYS` jours. Des graphiques bâtis là-dessus perdraient
+leurs données au moment où elles comptent. Le master tient donc un **historique
+à part**, en Postgres (tables `history_*`), que rien dans l'application ne
+supprime ni ne décrémente :
+
+| Donnée | Comment elle est enregistrée |
+|---|---|
+| Denials | comptés à l'ingestion (`internal/history`), par heure UTC, machine et signature, puis écrits par lots toutes les 10 s |
+| Déploiements, alertes | copiés par des déclencheurs Postgres sur `commands` et `alerts` (aucun déclencheur de suppression) |
+| État du parc | un instantané de chaque machine toutes les 15 min (mode, joignable, politique, alertes ouvertes, score de conformité) |
+
+Au premier démarrage, l'existant est repris : les denials encore présents dans
+OpenSearch (résolus et en quarantaine compris) sont comptés une seule fois — ils
+sont reconnus au fait qu'ils n'ont pas d'horodatage d'ingestion `ingested_unix`,
+que le comptage en direct ajoute à chaque nouvel événement, donc jamais deux
+fois — et les lignes déjà présentes dans `commands` et `alerts` sont copiées. Ce
+qui avait déjà été supprimé avant ne peut pas être récupéré : l'historique
+commence à l'installation. **`HISTORY_RETENTION_DAYS`** (défaut **365**, `0` =
+illimité) purge les lignes plus anciennes ; l'historique est agrégé, il coûte
+très peu.
+
+API : `GET /api/history/{denials|commands|alerts|fleet}?days=30&bucket=day&group=agent,tclass`
+(`bucket` : `hour|day|week|month|none` ; `group` : jusqu'à 4 dimensions d'une
+liste fixe propre à chaque jeu de données, rien n'est jamais interpolé dans le
+SQL) et `GET /api/history` (depuis quand l'historique existe, par jeu de données).
+
+Côté interface, la page **Graphiques** (menu Vue d'ensemble) montre les 45 types
+de graphiques (classiques, répartition, KPI, statistiques, corrélation) sur l'un
+de ces quatre jeux de données ; **Ajouter au dashboard** en fait une vignette,
+reconfigurable depuis le dashboard en mode « Personnaliser ». Chaque graphique
+peut aussi s'afficher en tableau. `npm test` (dans `frontend/`) exécute les tests
+des calculs (quartiles, densité, corrélation, hexbin…).
+
 ## Volumétrie : dimensionner pour un gros volume de denials
 
 Le composant qui détermine la capacité réelle du système, c'est

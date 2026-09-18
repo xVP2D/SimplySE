@@ -5,6 +5,11 @@ import react from "@vitejs/plugin-react";
 // dashboard can call relative paths without dealing with CORS itself.
 export default defineConfig({
   plugins: [react()],
+  build: {
+    // ECharts is a deliberate, lazily loaded chunk (see charts/); it is the
+    // one file expected to exceed the default warning size.
+    chunkSizeWarningLimit: 800,
+  },
   server: {
     port: Number(process.env.VITE_DEV_PORT ?? 5173),
     proxy: {

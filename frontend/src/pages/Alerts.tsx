@@ -134,7 +134,7 @@ export function Alerts() {
         </span>
       </div>
 
-      {error && <div style={{ color: "var(--color-accent-300)", fontSize: 13 }}>{error}</div>}
+      {error && <div style={{ color: "var(--color-danger)", fontSize: 13 }}>{error}</div>}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8.4 }}>
         {alerts.map((a) => (

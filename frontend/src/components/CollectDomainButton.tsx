@@ -74,7 +74,7 @@ export function CollectDomainButton({
           {busy ? "…" : t("collect.startButton")}
         </button>
       </div>
-      {error && <span style={{ fontSize: 11, color: "var(--color-accent-300)" }}>{error}</span>}
+      {error && <span style={{ fontSize: 11, color: "var(--color-danger)" }}>{error}</span>}
     </div>
   );
 }

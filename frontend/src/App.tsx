@@ -1,6 +1,8 @@
+import { lazy, Suspense } from "react";
 import { Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { Dashboard } from "./pages/Dashboard";
+const Charts = lazy(() => import("./pages/Charts").then((m) => ({ default: m.Charts })));
 import { Agents } from "./pages/Agents";
 import { AgentDetail } from "./pages/AgentDetail";
 import { Denials } from "./pages/Denials";
@@ -18,6 +20,14 @@ export function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<Dashboard />} />
+        <Route
+          path="charts"
+          element={
+            <Suspense fallback={null}>
+              <Charts />
+            </Suspense>
+          }
+        />
         <Route path="agents" element={<Agents />} />
         <Route path="agents/:id" element={<AgentDetail />} />
         <Route path="denials" element={<Denials />} />

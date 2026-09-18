@@ -171,7 +171,7 @@ export function DeployRuleDialog({
             </>
           )}
 
-          {error && <p style={{ color: "var(--color-accent-300)", margin: 0 }}>{error}</p>}
+          {error && <p style={{ color: "var(--color-danger)", margin: 0 }}>{error}</p>}
         </div>
         <div className="dialog-actions">
           <button type="button" className="btn btn-secondary" onClick={onClose}>

@@ -47,7 +47,7 @@ export function RevertButton({ command, host, onChanged }: { command: Command; h
       <button type="button" className="btn btn-ghost" disabled={busy} onClick={click}>
         {busy ? "…" : t("revert.delete")}
       </button>
-      {error && <span style={{ fontSize: 11, color: "var(--color-accent-300)", maxWidth: 220, textAlign: "right" }}>{error}</span>}
+      {error && <span style={{ fontSize: 11, color: "var(--color-danger)", maxWidth: 220, textAlign: "right" }}>{error}</span>}
     </div>
   );
 }

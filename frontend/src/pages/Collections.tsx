@@ -97,7 +97,7 @@ export function Collections() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 11.2 }}>
       <p style={{ margin: 0, fontSize: 12, color: "var(--color-neutral-500)" }}>{t("collect.pageExplainer")}</p>
-      {error && <div style={{ color: "var(--color-accent-300)", fontSize: 13 }}>{error}</div>}
+      {error && <div style={{ color: "var(--color-danger)", fontSize: 13 }}>{error}</div>}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8.4 }}>
         {collections.map((c) => {
@@ -125,7 +125,7 @@ export function Collections() {
                 <Link to={`/agents/${c.agent_id}`} style={{ fontSize: 12.5 }}>
                   {agentsByID.get(c.agent_id)?.hostname || c.agent_id}
                 </Link>
-                <span style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5 }}>{c.domain}</span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{c.domain}</span>
                 <span style={{ fontSize: 11, color: "var(--color-neutral-600)" }}>
                   {new Date(c.started_at).toLocaleString(locale)} · {c.created_by}
                 </span>
@@ -154,7 +154,7 @@ export function Collections() {
                     style={{
                       height: 6,
                       borderRadius: 3,
-                      background: "var(--color-neutral-800, rgba(255,255,255,0.08))",
+                      background: "var(--color-sunken)",
                       overflow: "hidden",
                     }}
                   >
@@ -177,7 +177,7 @@ export function Collections() {
               {(c.status === "collected" || c.status === "done") && (
                 <span style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>{t("collect.linesCollected", { count: c.lines_count })}</span>
               )}
-              {c.status === "failed" && c.message && <span style={{ fontSize: 12, color: "var(--color-accent-300)" }}>{c.message}</span>}
+              {c.status === "failed" && c.message && <span style={{ fontSize: 12, color: "var(--color-danger)" }}>{c.message}</span>}
             </div>
           );
         })}

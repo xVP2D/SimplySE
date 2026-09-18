@@ -180,7 +180,7 @@ export function Denials({ quarantine = false }: { quarantine?: boolean }) {
         </span>
       </div>
 
-      {error && <div style={{ color: "var(--color-accent-300)", fontSize: 13 }}>{error}</div>}
+      {error && <div style={{ color: "var(--color-danger)", fontSize: 13 }}>{error}</div>}
 
       <div style={{ overflowX: "auto", borderRadius: 8, background: "var(--color-surface)", boxShadow: "var(--shadow-sm)" }}>
         <table className="table">
@@ -204,7 +204,7 @@ export function Denials({ quarantine = false }: { quarantine?: boolean }) {
                 <td style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>
                   <Link to={`/agents/${d.agent_id}`}>{agentsByID.get(d.agent_id)?.hostname || d.agent_id}</Link>
                 </td>
-                <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, maxWidth: 280, wordBreak: "break-word" }}>
+                <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, maxWidth: 280, wordBreak: "break-word" }}>
                   <div>
                     {d.scontext} → {d.tcontext}
                   </div>
@@ -212,7 +212,7 @@ export function Denials({ quarantine = false }: { quarantine?: boolean }) {
                     {explainDenial(d, locale)}
                   </div>
                 </td>
-                <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, color: "var(--color-neutral-400)" }}>
+                <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--color-neutral-400)" }}>
                   {d.tclass} · {d.perms.join(",")}
                 </td>
                 <td style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>{d.comm}</td>

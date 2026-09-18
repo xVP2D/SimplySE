@@ -23,7 +23,7 @@ function Block({ block }: { block: WikiBlock }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 11.2 }}>
           {block.items.map(([term, def], i) => (
             <div key={i}>
-              <div style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 13, color: "var(--color-accent)" }}>{term}</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--color-accent)" }}>{term}</div>
               <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--color-neutral-300)" }}>{def}</div>
             </div>
           ))}
@@ -34,9 +34,9 @@ function Block({ block }: { block: WikiBlock }) {
         <pre
           style={{
             margin: 0,
-            fontFamily: "ui-monospace,Menlo,monospace",
+            fontFamily: "var(--font-mono)",
             fontSize: 12,
-            background: "var(--color-neutral-900, rgba(0,0,0,0.15))",
+            background: "var(--color-sunken)",
             padding: 11.2,
             borderRadius: 6,
             overflowX: "auto",
@@ -57,7 +57,7 @@ export function Wiki() {
   const active = sections.find((s) => s.id === activeId) ?? sections[0];
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "200px minmax(0,1fr)", gap: 16.8, alignItems: "start" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "250px minmax(0,1fr)", gap: 16.8, alignItems: "start" }}>
       <nav
         style={{
           display: "flex",
@@ -68,7 +68,7 @@ export function Wiki() {
           background: "var(--color-surface)",
           boxShadow: "var(--shadow-sm)",
           position: "sticky",
-          top: 0,
+          top: "calc(var(--topbar-h) + 16px)",
         }}
       >
         {sections.map((s) => (
@@ -76,7 +76,7 @@ export function Wiki() {
             key={s.id}
             type="button"
             className={"btn " + (s.id === activeId ? "btn-primary" : "btn-ghost")}
-            style={{ justifyContent: "flex-start", textAlign: "left" }}
+            style={{ justifyContent: "flex-start", textAlign: "left", whiteSpace: "normal", lineHeight: 1.35 }}
             onClick={() => setActiveId(s.id)}
           >
             {s.title}
@@ -89,7 +89,8 @@ export function Wiki() {
           display: "flex",
           flexDirection: "column",
           gap: 11.2,
-          padding: 16.8,
+          padding: 24,
+          maxWidth: 880,
           borderRadius: 8,
           background: "var(--color-surface)",
           boxShadow: "var(--shadow-sm)",

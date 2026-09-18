@@ -3,7 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Console SELinux</title>
+    <title>SimplySE</title>
+    <script>
+      // Resolve the theme before first paint so a dark-mode user never sees a
+      // light flash. Stored choice wins; otherwise follow the system setting.
+      (function () {
+        var theme = null;
+        try { theme = localStorage.getItem("simplyse-theme"); } catch (e) {}
+        if (theme !== "light" && theme !== "dark") {
+          theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css" />
   </head>

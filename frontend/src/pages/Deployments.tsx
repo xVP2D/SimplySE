@@ -111,7 +111,7 @@ export function Deployments() {
         </span>
       </div>
 
-      {error && <div style={{ color: "var(--color-accent-300)", fontSize: 13 }}>{error}</div>}
+      {error && <div style={{ color: "var(--color-danger)", fontSize: 13 }}>{error}</div>}
 
       <div style={{ overflowX: "auto", borderRadius: 8, background: "var(--color-surface)", boxShadow: "var(--shadow-sm)" }}>
         <table className="table">
@@ -135,8 +135,8 @@ export function Deployments() {
                 <td style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>
                   <Link to={`/agents/${c.agent_id}`}>{agentsByID.get(c.agent_id)?.hostname || c.agent_id}</Link>
                 </td>
-                <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5, whiteSpace: "nowrap" }}>{c.type}</td>
-                <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, color: "var(--color-neutral-400)", maxWidth: 260 }}>
+                <td style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, whiteSpace: "nowrap" }}>{c.type}</td>
+                <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--color-neutral-400)", maxWidth: 260 }}>
                   <div style={{ maxHeight: 90, overflowY: "auto", wordBreak: "break-all" }}>{formatPayload(c.payload_json)}</div>
                 </td>
                 <td style={{ whiteSpace: "nowrap" }}>

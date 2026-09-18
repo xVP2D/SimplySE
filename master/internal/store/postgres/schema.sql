@@ -205,3 +205,101 @@ CREATE TABLE IF NOT EXISTS dashboard_layout (
     widgets_json JSONB NOT NULL DEFAULT '[]',
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ── Permanent history (feeds the dashboard's charts) ─────────────────────
+-- Everything below is append-only from the application's point of view:
+-- nothing ever decrements or deletes these rows, so a chart keeps its data
+-- after a denial is resolved by a rule, quarantined or deleted, after a
+-- deployment or an alert is removed from its list, or after an agent is
+-- gone (which is why none of them references agents(id)). Only PurgeHistory
+-- (retention, HISTORY_RETENTION_DAYS) removes old rows.
+CREATE TABLE IF NOT EXISTS history_meta (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Denials, counted at ingestion (see internal/history): one row per UTC
+-- hour, agent and signature, incremented as events arrive. perms is the
+-- sorted, comma-joined permission set.
+CREATE TABLE IF NOT EXISTS history_denials_hourly (
+    bucket   TIMESTAMPTZ NOT NULL,
+    agent_id TEXT NOT NULL,
+    scontext TEXT NOT NULL,
+    tcontext TEXT NOT NULL,
+    tclass   TEXT NOT NULL,
+    perms    TEXT NOT NULL,
+    count    BIGINT NOT NULL,
+    PRIMARY KEY (bucket, agent_id, scontext, tcontext, tclass, perms)
+);
+CREATE INDEX IF NOT EXISTS idx_history_denials_agent ON history_denials_hourly (agent_id, bucket);
+
+-- Rule deployments. Filled by a trigger on commands, so it captures every
+-- code path that creates or updates a command; there is deliberately no
+-- DELETE trigger.
+CREATE TABLE IF NOT EXISTS history_commands (
+    id         UUID PRIMARY KEY,
+    agent_id   TEXT NOT NULL,
+    type       TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    is_revert  BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL,
+    acked_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_history_commands_created ON history_commands (created_at);
+
+CREATE OR REPLACE FUNCTION history_track_command() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO history_commands (id, agent_id, type, status, is_revert, created_at, acked_at)
+    VALUES (NEW.id, NEW.agent_id, NEW.type, NEW.status, NEW.reverts_command_id IS NOT NULL, NEW.created_at, NEW.acked_at)
+    ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, acked_at = EXCLUDED.acked_at;
+    RETURN NULL;
+END
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE TRIGGER history_commands_track
+    AFTER INSERT OR UPDATE ON commands
+    FOR EACH ROW EXECUTE FUNCTION history_track_command();
+INSERT INTO history_commands (id, agent_id, type, status, is_revert, created_at, acked_at)
+    SELECT id, agent_id, type, status, reverts_command_id IS NOT NULL, created_at, acked_at FROM commands
+    ON CONFLICT (id) DO NOTHING;
+
+-- Alerts, same mechanism as deployments.
+CREATE TABLE IF NOT EXISTS history_alerts (
+    id              UUID PRIMARY KEY,
+    type            TEXT NOT NULL,
+    severity        TEXT NOT NULL,
+    agent_id        TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL,
+    acknowledged_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_history_alerts_created ON history_alerts (created_at);
+
+CREATE OR REPLACE FUNCTION history_track_alert() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO history_alerts (id, type, severity, agent_id, status, created_at, acknowledged_at)
+    VALUES (NEW.id, NEW.type, NEW.severity, NEW.agent_id, NEW.status, NEW.created_at, NEW.acknowledged_at)
+    ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, acknowledged_at = EXCLUDED.acknowledged_at;
+    RETURN NULL;
+END
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE TRIGGER history_alerts_track
+    AFTER INSERT OR UPDATE ON alerts
+    FOR EACH ROW EXECUTE FUNCTION history_track_alert();
+INSERT INTO history_alerts (id, type, severity, agent_id, status, created_at, acknowledged_at)
+    SELECT id, type, severity, agent_id, status, created_at, acknowledged_at FROM alerts
+    ON CONFLICT (id) DO NOTHING;
+
+-- Fleet state, sampled on a timer (see history.Sampler): one row per agent
+-- and sample time, with the compliance score computed the same way the
+-- dashboard's Compliance page does.
+CREATE TABLE IF NOT EXISTS history_fleet_samples (
+    ts          TIMESTAMPTZ NOT NULL,
+    agent_id    TEXT NOT NULL,
+    mode        TEXT NOT NULL,
+    policy      TEXT NOT NULL,
+    connected   BOOLEAN NOT NULL,
+    score       INT NOT NULL,
+    open_alerts INT NOT NULL,
+    PRIMARY KEY (ts, agent_id)
+);

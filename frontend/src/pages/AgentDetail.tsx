@@ -154,7 +154,7 @@ export function AgentDetail() {
     }
   };
 
-  if (error) return <div style={{ color: "var(--color-accent-300)" }}>{error}</div>;
+  if (error) return <div style={{ color: "var(--color-danger)" }}>{error}</div>;
   if (!agent) return <p style={{ color: "var(--color-neutral-500)" }}>{t("common.loading")}</p>;
 
   return (
@@ -184,7 +184,7 @@ export function AgentDetail() {
               background: agent.connected ? "var(--color-accent)" : "var(--color-neutral-700)",
             }}
           />
-          <span style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 16 }}>{agent.hostname}</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 16 }}>{agent.hostname}</span>
           <span className="tag tag-neutral" style={{ marginLeft: "auto" }}>
             agent {agent.agent_version || "?"}
           </span>
@@ -271,8 +271,8 @@ export function AgentDetail() {
                   <td style={{ fontSize: 12, color: "var(--color-neutral-500)", whiteSpace: "nowrap" }}>
                     {new Date(c.created_at).toLocaleString(locale)}
                   </td>
-                  <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5, whiteSpace: "nowrap" }}>{c.type}</td>
-                  <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, color: "var(--color-neutral-400)", maxWidth: 260 }}>
+                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, whiteSpace: "nowrap" }}>{c.type}</td>
+                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--color-neutral-400)", maxWidth: 260 }}>
                     <div style={{ maxHeight: 90, overflowY: "auto", wordBreak: "break-all" }}>{formatPayload(c.payload_json)}</div>
                   </td>
                   <td style={{ whiteSpace: "nowrap" }}>
@@ -345,7 +345,7 @@ export function AgentDetail() {
                 .filter((b) => b.name.toLowerCase().includes(booleanFilter.toLowerCase()))
                 .map((b) => (
                   <tr key={b.name}>
-                    <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5 }}>{b.name}</td>
+                    <td style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{b.name}</td>
                     <td>
                       <span className={b.value ? "tag tag-accent" : "tag tag-neutral"}>{b.value ? "on" : "off"}</span>
                     </td>
@@ -412,7 +412,7 @@ export function AgentDetail() {
                 .filter((m) => m.name.toLowerCase().includes(moduleFilter.toLowerCase()))
                 .map((m) => (
                   <tr key={m.name}>
-                    <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5 }}>{m.name}</td>
+                    <td style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{m.name}</td>
                     <td style={{ fontSize: 12, color: "var(--color-neutral-400)" }}>{m.version || "—"}</td>
                   </tr>
                 ))}
@@ -451,8 +451,8 @@ export function AgentDetail() {
           <tbody>
             {Object.entries(selinuxState?.file_hashes ?? {}).map(([path, hash]) => (
               <tr key={path}>
-                <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5 }}>{path}</td>
-                <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, color: "var(--color-neutral-400)" }}>
+                <td style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{path}</td>
+                <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--color-neutral-400)" }}>
                   {hash.slice(0, 12)}…
                 </td>
               </tr>
@@ -503,7 +503,7 @@ export function AgentDetail() {
               <>
                 <tr key={i} style={{ cursor: "pointer" }} onClick={() => toggleDenial(i, d)}>
                   <td style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>{new Date(d.timestamp).toLocaleTimeString(locale)}</td>
-                  <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12 }}>
+                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
                     <div>
                       {d.scontext} → {d.tcontext}
                     </div>
@@ -511,7 +511,7 @@ export function AgentDetail() {
                       {explainDenial(d, locale)}
                     </div>
                   </td>
-                  <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, color: "var(--color-neutral-400)" }}>
+                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--color-neutral-400)" }}>
                     {d.tclass} · {d.perms.join(",")}
                   </td>
                   <td style={{ fontSize: 12.5 }}>{d.comm}</td>
@@ -523,10 +523,10 @@ export function AgentDetail() {
                     <td
                       colSpan={6}
                       style={{
-                        fontFamily: "ui-monospace,Menlo,monospace",
+                        fontFamily: "var(--font-mono)",
                         fontSize: 11.5,
                         color: "var(--color-neutral-400)",
-                        background: "var(--color-neutral-900, rgba(0,0,0,0.15))",
+                        background: "var(--color-sunken)",
                         wordBreak: "break-all",
                         whiteSpace: "pre-wrap",
                         padding: 8.4,
@@ -565,7 +565,7 @@ export function AgentDetail() {
                       </div>
                       {correlateSources.length > 0 && (
                         <div style={{ marginTop: 8.4, borderTop: "1px solid var(--color-divider)", paddingTop: 8.4 }}>
-                          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4.2 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4.2 }}>
                             {t("agentDetail.correlatedEvents")}
                           </div>
                           {correlating && <div>{t("common.loading")}</div>}
