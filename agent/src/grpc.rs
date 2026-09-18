@@ -85,7 +85,7 @@ async fn connect_and_serve(
             }
             msg = inbound.message() => {
                 match msg? {
-                    Some(server_msg) => handle_server_message(server_msg, &out_tx).await,
+                    Some(server_msg) => handle_server_message(server_msg, &out_tx, &config.agent_id).await,
                     None => return Err(anyhow!("server closed the stream")),
                 }
             }
@@ -121,11 +121,17 @@ async fn build_channel(config: &Config) -> anyhow::Result<Channel> {
         .context("connect to master")
 }
 
-async fn handle_server_message(msg: pb::ServerMessage, out_tx: &mpsc::Sender<pb::AgentMessage>) {
+async fn handle_server_message(
+    msg: pb::ServerMessage,
+    out_tx: &mpsc::Sender<pb::AgentMessage>,
+    agent_id: &str,
+) {
     let Some(payload) = msg.payload else { return };
     match payload {
         pb::server_message::Payload::Command(command) => {
             let command_id = command.command_id.clone();
+            let command_type =
+                pb::CommandType::try_from(command.r#type).unwrap_or(pb::CommandType::Unspecified);
             let (success, message) = action::execute(&command).await;
             tracing::info!(command_id = %command_id, success, message = %message, "executed command");
             let _ = out_tx
@@ -137,6 +143,20 @@ async fn handle_server_message(msg: pb::ServerMessage, out_tx: &mpsc::Sender<pb:
                     })),
                 })
                 .await;
+
+            // Push a fresh snapshot right away rather than leaving the
+            // dashboard showing a stale value for up to
+            // SELINUX_INVENTORY_INTERVAL_SECS after a change that just
+            // succeeded — mode doesn't need this (heartbeat already
+            // reports it on its own, much shorter interval).
+            if success
+                && matches!(
+                    command_type,
+                    pb::CommandType::SetBoolean | pb::CommandType::InstallModule
+                )
+            {
+                let _ = out_tx.send(selinux_inventory_message(agent_id).await).await;
+            }
         }
         pb::server_message::Payload::HeartbeatAck(_) => {}
     }
