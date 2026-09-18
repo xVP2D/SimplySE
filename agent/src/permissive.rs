@@ -235,31 +235,42 @@ fn finish_removal(state: &mut State, domain: &str, what: &str) -> (bool, String)
 fn arm_timer(domain: String, secs: u64) {
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(secs)).await;
-        expire(&domain).await;
+        expire(domain).await;
     });
 }
 
+type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
+
 /// Removes `domain` if its recorded deadline has passed (a later extension
 /// moves the deadline, so an earlier timer firing then does nothing).
-async fn expire(domain: &str) {
-    let _guard = LOCK.lock().await;
-    let state = read_state();
-    if let Some(entry) = state.domains.get(domain)
-        && entry.until_unix <= now_unix() + 1
-    {
-        let (ok, message) = stop_locked(domain).await;
+///
+/// Returns an explicitly type-erased future (`dyn Future`, not a plain
+/// `async fn`): this function calls itself (on retry), and a recursive
+/// `async fn` has no finite size on its own — only boxing behind `dyn`
+/// breaks the recursion for the compiler.
+fn expire(domain: String) -> BoxFuture<'static, ()> {
+    Box::pin(async move {
+        let _guard = LOCK.lock().await;
+        let state = read_state();
+        let Some(entry) = state.domains.get(&domain) else {
+            return;
+        };
+        if entry.until_unix > now_unix() + 1 {
+            return;
+        }
+        let (ok, message) = stop_locked(&domain).await;
         if ok {
-            tracing::info!(domain, message, "permissive collection window ended");
+            tracing::info!(domain = %domain, message = %message, "permissive collection window ended");
         } else {
-            tracing::error!(domain, message, "could not end the permissive collection window; will retry");
+            tracing::error!(domain = %domain, message = %message, "could not end the permissive collection window; will retry");
             // Try again shortly rather than leave a domain permissive.
-            let retry = domain.to_string();
+            let retry = domain.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(30)).await;
-                Box::pin(expire(&retry)).await;
+                expire(retry).await;
             });
         }
-    }
+    })
 }
 
 /// On agent start: finish what was pending when the previous process ended —
@@ -269,7 +280,7 @@ pub async fn recover() {
     let now = now_unix();
     for (domain, entry) in state.domains {
         if entry.until_unix <= now {
-            expire(&domain).await;
+            expire(domain).await;
         } else if !entry.preexisting {
             arm_timer(domain, (entry.until_unix - now) as u64);
         }
