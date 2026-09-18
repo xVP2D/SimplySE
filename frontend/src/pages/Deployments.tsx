@@ -124,22 +124,14 @@ export function Deployments() {
                   <Link to={`/agents/${c.agent_id}`}>{agentsByID.get(c.agent_id)?.hostname || c.agent_id}</Link>
                 </td>
                 <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5, whiteSpace: "nowrap" }}>{c.type}</td>
-                <td
-                  style={{
-                    fontFamily: "ui-monospace,Menlo,monospace",
-                    fontSize: 12,
-                    color: "var(--color-neutral-400)",
-                    maxWidth: 260,
-                    wordBreak: "break-word",
-                  }}
-                >
-                  {formatPayload(c.payload_json)}
+                <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, color: "var(--color-neutral-400)", maxWidth: 260 }}>
+                  <div style={{ maxHeight: 90, overflowY: "auto", wordBreak: "break-all" }}>{formatPayload(c.payload_json)}</div>
                 </td>
                 <td style={{ whiteSpace: "nowrap" }}>
                   <span className={statusTagClass(c.status)}>{c.status}</span>
                 </td>
-                <td style={{ fontSize: 12, color: "var(--color-neutral-500)", maxWidth: 320, wordBreak: "break-word" }}>
-                  {c.result_message}
+                <td style={{ fontSize: 12, color: "var(--color-neutral-500)", maxWidth: 320 }}>
+                  <div style={{ maxHeight: 90, overflowY: "auto", wordBreak: "break-all" }}>{c.result_message}</div>
                 </td>
               </tr>
             ))}

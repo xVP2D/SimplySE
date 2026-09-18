@@ -236,22 +236,14 @@ export function AgentDetail() {
                     {new Date(c.created_at).toLocaleString(locale)}
                   </td>
                   <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5, whiteSpace: "nowrap" }}>{c.type}</td>
-                  <td
-                    style={{
-                      fontFamily: "ui-monospace,Menlo,monospace",
-                      fontSize: 12,
-                      color: "var(--color-neutral-400)",
-                      maxWidth: 260,
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {formatPayload(c.payload_json)}
+                  <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, color: "var(--color-neutral-400)", maxWidth: 260 }}>
+                    <div style={{ maxHeight: 90, overflowY: "auto", wordBreak: "break-all" }}>{formatPayload(c.payload_json)}</div>
                   </td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     <span className={statusTagClass(c.status)}>{c.status}</span>
                   </td>
-                  <td style={{ fontSize: 12, color: "var(--color-neutral-500)", maxWidth: 260, wordBreak: "break-word" }}>
-                    {c.result_message}
+                  <td style={{ fontSize: 12, color: "var(--color-neutral-500)", maxWidth: 260 }}>
+                    <div style={{ maxHeight: 90, overflowY: "auto", wordBreak: "break-all" }}>{c.result_message}</div>
                   </td>
                 </tr>
               ))}

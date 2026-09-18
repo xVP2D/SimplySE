@@ -209,7 +209,8 @@ export function Suggestions() {
                       background: "var(--color-neutral-900, rgba(0,0,0,0.15))",
                       padding: 11.2,
                       borderRadius: 6,
-                      overflowX: "auto",
+                      maxHeight: 300,
+                      overflow: "auto",
                       whiteSpace: "pre",
                     }}
                   >
