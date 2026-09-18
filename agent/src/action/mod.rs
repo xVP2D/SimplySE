@@ -154,6 +154,21 @@ async fn remove_module(payload_json: &str) -> (bool, String) {
     if !is_safe_module_name(&payload.name) {
         return (false, format!("refusing unsafe module name {:?}", payload.name));
     }
+    // Idempotent: the goal is "this module is not installed", so a module
+    // that is already gone (removed by hand since) counts as success —
+    // otherwise its entry could never be deleted from the list.
+    match Command::new("semodule").arg("-l").output().await {
+        Ok(output) if output.status.success() => {
+            let installed = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .any(|line| line.split_whitespace().next() == Some(payload.name.as_str()));
+            if !installed {
+                return (true, "module was not installed, nothing to remove".to_string());
+            }
+        }
+        // Can't list modules: fall through and let `semodule -r` decide.
+        _ => {}
+    }
     run_and_report("semodule", &["-r", &payload.name]).await
 }
 
@@ -175,6 +190,14 @@ async fn restorecon(payload_json: &str) -> (bool, String) {
     // working directory, and a leading `-` would read as an option.
     if !payload.path.starts_with('/') {
         return (false, format!("refusing non-absolute path {:?}", payload.path));
+    }
+
+    // Idempotent for the same reason as remove_module: a path that no longer
+    // exists has nothing left to restore.
+    if let Err(err) = tokio::fs::symlink_metadata(&payload.path).await {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            return (true, "path no longer exists, nothing to restore".to_string());
+        }
     }
 
     let mut args: Vec<&str> = vec!["-v"];
