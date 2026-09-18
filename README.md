@@ -210,25 +210,31 @@ d'un denial précis qu'un opérateur consulte (voir `master/internal/correlate`)
 Rien de ce qui est lu n'est réécrit dans Postgres/OpenSearch : c'est une
 requête à la volée, affichée puis oubliée.
 
-Deux connecteurs, tous deux optionnels (désactivés si leurs variables
-d'environnement ne sont pas renseignées) :
+Deux connecteurs, tous deux optionnels, **configurés depuis le dashboard**
+(page **Paramètres**, `/settings`) plutôt que par variables d'environnement :
+un formulaire par connecteur (URL, identifiants, options), un bouton
+« Tester la connexion » (utilise la méthode `Ping()` du connecteur avant
+d'enregistrer quoi que ce soit), et un bouton « Enregistrer ». La
+configuration est stockée côté master dans Postgres (`integration_settings`,
+en clair — même compromis que `/etc/selinux-fleet-manager/secrets.env`) et
+appliquée à chaud : `correlate.Registry.SetSources` est rappelé juste après
+chaque sauvegarde, donc un changement prend effet immédiatement, sans
+redémarrer `selinux-fleet-master`. Le mot de passe/jeton n'est jamais
+renvoyé par `GET /api/integrations` (seulement `password_set`/`token_set`) ;
+le laisser vide en enregistrant conserve la valeur déjà stockée.
 
-- **`SIEM_OPENSEARCH_URL`** (+ `SIEM_OPENSEARCH_INDEX`, `SIEM_OPENSEARCH_HOST_FIELD`,
-  `SIEM_OPENSEARCH_USER`/`_PASSWORD`, `SIEM_OPENSEARCH_INSECURE_SKIP_VERIFY`,
-  `SIEM_OPENSEARCH_NAME`) : connecteur générique compatible
+- **SIEM / EDR (OpenSearch-compatible)** : connecteur générique compatible
   OpenSearch/Elasticsearch. C'est ce qui permet d'atteindre **Wazuh**
   directement (son indexeur est OpenSearch/Elasticsearch depuis la 4.x —
-  pointer `SIEM_OPENSEARCH_INDEX` sur `wazuh-alerts-*`) et tout aussi bien
-  une pile **Suricata** dont le `eve.json` est expédié vers une stack
-  ELK/OpenSearch — même code, juste un index et un nom de champ différents.
-  Mécanisme vérifié en conditions réelles contre un vrai cluster OpenSearch
-  avec un document au format Wazuh (`agent.ip`, `@timestamp`,
-  `rule.description`, `rule.level`).
-- **`LIBRENMS_URL`** + `LIBRENMS_TOKEN` : connecteur REST LibreNMS
-  (`/api/v0/alerts`, filtré côté master par hôte et fenêtre de temps).
-  Implémenté d'après l'API documentée, non testé contre une instance
-  LibreNMS réelle (aucune disponible dans cet environnement) — à valider
-  avant un usage en production.
+  pointer l'index sur `wazuh-alerts-*`) et tout aussi bien une pile
+  **Suricata** dont le `eve.json` est expédié vers une stack ELK/OpenSearch —
+  même code, juste un index et un nom de champ différents. Mécanisme vérifié
+  en conditions réelles contre un vrai cluster OpenSearch avec un document au
+  format Wazuh (`agent.ip`, `@timestamp`, `rule.description`, `rule.level`).
+- **LibreNMS** : connecteur REST (`/api/v0/alerts`, filtré côté master par
+  hôte et fenêtre de temps). Implémenté d'après l'API documentée, non testé
+  contre une instance LibreNMS réelle (aucune disponible dans cet
+  environnement) — à valider avant un usage en production.
 
 Le dashboard expose ceci sur la page détail d'un agent : chaque denial
 peut être déplié pour voir, en plus de sa ligne brute, les événements
