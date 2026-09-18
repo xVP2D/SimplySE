@@ -595,8 +595,25 @@ func (s *Store) EnsureRetentionPolicy(ctx context.Context, retentionDays int) er
 			},
 		},
 	}
-	if err := s.putJSON(ctx, "/_index_template/"+templateName, template, nil); err != nil {
+	if err := s.sendJSON(ctx, http.MethodPut, "/_index_template/"+templateName, template, nil); err != nil {
 		return fmt.Errorf("apply index template: %w", err)
+	}
+
+	// ism_template only matches indices created AFTER the policy's last
+	// update, and this function rewrites the policy on every boot — so a
+	// daily index created shortly before a restart (or before the policy
+	// first existed) would never be picked up on its own. Attach the policy
+	// explicitly to whatever avc_events-* indices already exist; ISM skips
+	// the ones it already manages (reported as "failed", which is fine).
+	// The legacy fixed avc_events index deliberately doesn't match this
+	// pattern: its history is never expired automatically.
+	attach := map[string]any{"policy_id": retentionPolicyID}
+	if err := s.sendJSON(ctx, http.MethodPost, "/_plugins/_ism/add/"+indexPrefix+"*", attach, nil); err != nil {
+		var statusErr *httpStatusError
+		// No daily index exists yet (fresh install): nothing to attach to.
+		if !errors.As(err, &statusErr) || statusErr.status != http.StatusNotFound {
+			return fmt.Errorf("attach retention policy to existing indices: %w", err)
+		}
 	}
 	return nil
 }
@@ -606,12 +623,12 @@ func (s *Store) EnsureRetentionPolicy(ctx context.Context, retentionDays int) er
 // already exists from a previous boot and this one changed retentionDays).
 func (s *Store) putISMPolicy(ctx context.Context, policy map[string]any) error {
 	path := "/_plugins/_ism/policies/" + retentionPolicyID
-	err := s.putJSON(ctx, path, policy, nil)
+	err := s.sendJSON(ctx, http.MethodPut, path, policy, nil)
 	if err == nil {
 		return nil
 	}
-	conflict, ok := err.(*httpStatusError)
-	if !ok || conflict.status != http.StatusConflict {
+	var conflict *httpStatusError
+	if !errors.As(err, &conflict) || conflict.status != http.StatusConflict {
 		return err
 	}
 
@@ -626,7 +643,7 @@ func (s *Store) putISMPolicy(ctx context.Context, policy map[string]any) error {
 		"if_seq_no":       fmt.Sprintf("%d", existing.SeqNo),
 		"if_primary_term": fmt.Sprintf("%d", existing.PrimaryTerm),
 	}
-	return s.putJSON(ctx, path, policy, query)
+	return s.sendJSON(ctx, http.MethodPut, path, policy, query)
 }
 
 type httpStatusError struct {
@@ -638,7 +655,7 @@ func (e *httpStatusError) Error() string {
 	return fmt.Sprintf("opensearch returned %d: %s", e.status, e.body)
 }
 
-func (s *Store) putJSON(ctx context.Context, path string, body map[string]any, query map[string]string) error {
+func (s *Store) sendJSON(ctx context.Context, method, path string, body map[string]any, query map[string]string) error {
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("marshal request body: %w", err)
@@ -651,7 +668,7 @@ func (s *Store) putJSON(ctx context.Context, path string, body map[string]any, q
 		}
 		url += "?" + strings.Join(q, "&")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(encoded))
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(encoded))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
