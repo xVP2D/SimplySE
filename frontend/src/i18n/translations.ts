@@ -28,6 +28,7 @@ const en: Dict = {
     suggestions: "Suggestions",
     wiki: "Wiki",
     settings: "Settings",
+    quarantine: "Quarantine",
   },
   brand: {
     subtitle: "Fleet control",
@@ -182,6 +183,12 @@ const en: Dict = {
     acknowledgedMeta: " · acknowledged on {date} by {by}",
     acknowledge: "Acknowledge",
     acknowledgedTag: "acknowledged",
+    quarantine: "Quarantine",
+    restore: "Restore",
+    delete: "Delete",
+    confirmDelete: "Permanently delete this alert?",
+    quarantineExplainer:
+      "Alerts you set aside. They no longer show in the Alerts list or the dashboard counts; restore one to bring it back, or delete it for good.",
     empty: "No alerts match this filter.",
   },
   suggestions: {
@@ -244,6 +251,7 @@ const fr: Dict = {
     suggestions: "Suggestions",
     wiki: "Wiki",
     settings: "Paramètres",
+    quarantine: "Quarantaine",
   },
   brand: {
     subtitle: "Fleet control",
@@ -398,6 +406,12 @@ const fr: Dict = {
     acknowledgedMeta: " · acquittée le {date} par {by}",
     acknowledge: "Acquitter",
     acknowledgedTag: "acquittée",
+    quarantine: "Quarantaine",
+    restore: "Restaurer",
+    delete: "Supprimer",
+    confirmDelete: "Supprimer définitivement cette alerte ?",
+    quarantineExplainer:
+      "Alertes mises de côté. Elles n'apparaissent plus dans la liste des alertes ni dans les compteurs du dashboard ; restaurez-en une pour la remettre, ou supprimez-la définitivement.",
     empty: "Aucune alerte ne correspond à ce filtre.",
   },
   suggestions: {
@@ -460,6 +474,7 @@ const es: Dict = {
     suggestions: "Sugerencias",
     wiki: "Wiki",
     settings: "Ajustes",
+    quarantine: "Cuarentena",
   },
   brand: {
     subtitle: "Fleet control",
@@ -614,6 +629,12 @@ const es: Dict = {
     acknowledgedMeta: " · reconocida el {date} por {by}",
     acknowledge: "Reconocer",
     acknowledgedTag: "reconocida",
+    quarantine: "Cuarentena",
+    restore: "Restaurar",
+    delete: "Eliminar",
+    confirmDelete: "¿Eliminar definitivamente esta alerta?",
+    quarantineExplainer:
+      "Alertas apartadas. Ya no aparecen en la lista de alertas ni en los contadores del panel; restaure una para recuperarla, o elimínela definitivamente.",
     empty: "Ninguna alerta coincide con este filtro.",
   },
   suggestions: {

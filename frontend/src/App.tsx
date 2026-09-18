@@ -24,6 +24,7 @@ export function App() {
         <Route path="deployments" element={<Deployments />} />
         <Route path="compliance" element={<Compliance />} />
         <Route path="alerts" element={<Alerts />} />
+        <Route path="quarantine" element={<Alerts quarantine />} />
         <Route path="suggestions" element={<Suggestions />} />
         <Route path="wiki" element={<Wiki />} />
         <Route path="settings" element={<Settings />} />

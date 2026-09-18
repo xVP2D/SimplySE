@@ -5,10 +5,12 @@ import { useTranslation } from "../i18n";
 
 const PAGE_SIZE = 20;
 
-export function Alerts() {
+// quarantine=true renders the Quarantine page: the same list, but fixed to
+// quarantined alerts, with Restore instead of Acknowledge/Quarantine.
+export function Alerts({ quarantine = false }: { quarantine?: boolean }) {
   const { t, locale } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const status = searchParams.get("status") ?? "open";
+  const status = quarantine ? "quarantined" : (searchParams.get("status") ?? "open");
   const severity = searchParams.get("severity") ?? "";
 
   const [offset, setOffset] = useState(0);
@@ -17,6 +19,7 @@ export function Alerts() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [acking, setAcking] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     setOffset(0);
@@ -94,11 +97,29 @@ export function Alerts() {
     }
   };
 
+  const runAction = async (id: string, action: () => Promise<unknown>) => {
+    setBusyId(id);
+    try {
+      await action();
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const remove = (id: string) => {
+    if (!window.confirm(t("alerts.confirmDelete"))) return;
+    runAction(id, () => api.deleteAlert(id));
+  };
+
   const from = total === 0 ? 0 : offset + 1;
   const to = Math.min(offset + PAGE_SIZE, total);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 11.2 }}>
+      {quarantine && <p style={{ margin: 0, fontSize: 12, color: "var(--color-neutral-500)" }}>{t("alerts.quarantineExplainer")}</p>}
       <div
         style={{
           display: "flex",
@@ -111,7 +132,7 @@ export function Alerts() {
           boxShadow: "var(--shadow-sm)",
         }}
       >
-        <div className="seg">
+        {!quarantine && <div className="seg">
           {[
             { value: "open", label: t("alerts.filterOpen") },
             { value: "acknowledged", label: t("alerts.filterAcknowledged") },
@@ -122,7 +143,7 @@ export function Alerts() {
               {opt.label}
             </label>
           ))}
-        </div>
+        </div>}
         <select className="input" style={{ width: 160 }} value={severity} onChange={(e) => setSeverityFilter(e.target.value)}>
           <option value="">{t("alerts.allSeverities")}</option>
           <option value="high">{t("alerts.severityHigh")}</option>
@@ -172,13 +193,36 @@ export function Alerts() {
                 )}
               </span>
             </div>
-            {a.status === "open" ? (
-              <button type="button" className="btn btn-secondary" disabled={acking === a.id} onClick={() => acknowledge(a.id)}>
-                {acking === a.id ? "…" : t("alerts.acknowledge")}
+            <div style={{ display: "flex", alignItems: "center", gap: 8.4, flexShrink: 0 }}>
+              {a.status === "open" && (
+                <button type="button" className="btn btn-secondary" disabled={acking === a.id} onClick={() => acknowledge(a.id)}>
+                  {acking === a.id ? "…" : t("alerts.acknowledge")}
+                </button>
+              )}
+              {a.status === "acknowledged" && <span className="tag tag-neutral">{t("alerts.acknowledgedTag")}</span>}
+              {a.status === "quarantined" ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={busyId === a.id}
+                  onClick={() => runAction(a.id, () => api.restoreAlert(a.id))}
+                >
+                  {t("alerts.restore")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={busyId === a.id}
+                  onClick={() => runAction(a.id, () => api.quarantineAlert(a.id))}
+                >
+                  {t("alerts.quarantine")}
+                </button>
+              )}
+              <button type="button" className="btn btn-ghost" disabled={busyId === a.id} onClick={() => remove(a.id)}>
+                {t("alerts.delete")}
               </button>
-            ) : (
-              <span className="tag tag-neutral">{t("alerts.acknowledgedTag")}</span>
-            )}
+            </div>
           </div>
         ))}
         {alerts.length === 0 && !loading && (

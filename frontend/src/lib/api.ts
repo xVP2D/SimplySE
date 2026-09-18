@@ -133,7 +133,7 @@ export interface Alert {
   tcontext: string;
   tclass: string;
   severity: "low" | "medium" | "high" | string;
-  status: "open" | "acknowledged" | string;
+  status: "open" | "acknowledged" | "quarantined" | string;
   created_at: string;
   acknowledged_at?: string;
   acknowledged_by: string;
@@ -287,6 +287,11 @@ export const api = {
   },
   acknowledgeAlert: (id: string) =>
     request<{ status: string }>(`/alerts/${id}/ack`, { method: "POST", body: JSON.stringify({}) }),
+  quarantineAlert: (id: string) =>
+    request<{ status: string }>(`/alerts/${id}/quarantine`, { method: "POST", body: JSON.stringify({}) }),
+  restoreAlert: (id: string) =>
+    request<{ status: string }>(`/alerts/${id}/restore`, { method: "POST", body: JSON.stringify({}) }),
+  deleteAlert: (id: string) => request<{ status: string }>(`/alerts/${id}`, { method: "DELETE" }),
   deployRule: (
     payload: {
       name: string;

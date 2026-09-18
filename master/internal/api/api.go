@@ -55,8 +55,9 @@ type API struct {
 	FrontendDist string
 
 	// Correlate holds whichever external SIEM/EDR/monitoring connectors
-	// were configured (see cmd/master's SIEM_OPENSEARCH_*/LIBRENMS_*
-	// env vars) — may be an empty, non-nil registry when none are.
+	// are enabled on the dashboard's Settings page (see
+	// RebuildCorrelateRegistry) — may be an empty, non-nil registry when
+	// none are.
 	Correlate *correlate.Registry
 }
 
@@ -86,6 +87,9 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/commands/recent", a.listRecentCommands)
 	mux.HandleFunc("GET /api/alerts", a.listAlerts)
 	mux.HandleFunc("POST /api/alerts/{id}/ack", a.acknowledgeAlert)
+	mux.HandleFunc("POST /api/alerts/{id}/quarantine", a.quarantineAlert)
+	mux.HandleFunc("POST /api/alerts/{id}/restore", a.restoreAlert)
+	mux.HandleFunc("DELETE /api/alerts/{id}", a.deleteAlert)
 	mux.HandleFunc("GET /api/enroll/{file}", a.enroll)
 	mux.HandleFunc("GET /api/health", a.health)
 	if a.FrontendDist != "" {
@@ -114,7 +118,7 @@ func spaHandler(dist string) http.HandlerFunc {
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -633,6 +637,32 @@ func (a *API) acknowledgeAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "acknowledged"})
+}
+
+// alertStateChange runs one of the Store's alert state changes and maps
+// "no such alert" to a 404 rather than a silent success.
+func (a *API) alertStateChange(w http.ResponseWriter, r *http.Request, change func(context.Context, string) error, status string) {
+	if err := change(r.Context(), r.PathValue("id")); err != nil {
+		if errors.Is(err, postgres.ErrAlertNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
+}
+
+func (a *API) quarantineAlert(w http.ResponseWriter, r *http.Request) {
+	a.alertStateChange(w, r, a.Store.QuarantineAlert, "quarantined")
+}
+
+func (a *API) restoreAlert(w http.ResponseWriter, r *http.Request) {
+	a.alertStateChange(w, r, a.Store.RestoreAlert, "open")
+}
+
+func (a *API) deleteAlert(w http.ResponseWriter, r *http.Request) {
+	a.alertStateChange(w, r, a.Store.DeleteAlert, "deleted")
 }
 
 func parseLimit(r *http.Request, def int) int {

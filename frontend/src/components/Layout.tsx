@@ -9,6 +9,7 @@ const navItems = [
   { to: "/deployments", icon: "ph-upload-simple", key: "nav.deployments" },
   { to: "/compliance", icon: "ph-shield-check", key: "nav.compliance" },
   { to: "/alerts", icon: "ph-bell", key: "nav.alerts" },
+  { to: "/quarantine", icon: "ph-prohibit", key: "nav.quarantine" },
   { to: "/suggestions", icon: "ph-magic-wand", key: "nav.suggestions" },
   { to: "/wiki", icon: "ph-book-open", key: "nav.wiki" },
   { to: "/settings", icon: "ph-gear", key: "nav.settings" },
