@@ -926,10 +926,39 @@ func (s *Store) listCollections(ctx context.Context, where string, args ...any) 
 
 // ListCollections: active runs first, then the most recent. agentID == ""
 // means every agent.
+// ListCollections lists collections that still need attention: any active
+// run, one awaiting a manual "generate" click, a failed one, or one whose
+// generated suggestion hasn't been reviewed yet. A "done" collection whose
+// suggestion has since been approved or rejected has nothing left to look
+// at, so it drops off this list once that happens — the row itself stays in
+// domain_collections as an audit trail of when a domain was loosened, by
+// whom and for how long; only what the live dashboard shows is affected.
+// agentID == "" means every agent.
 func (s *Store) ListCollections(ctx context.Context, agentID string, limit int) ([]Collection, error) {
-	return s.listCollections(ctx,
-		`WHERE ($1 = '' OR agent_id = $1) ORDER BY (status IN ('starting','collecting','stopping')) DESC, started_at DESC LIMIT $2`,
-		agentID, limit)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT dc.id, dc.agent_id, dc.domain, dc.status, dc.duration_secs, dc.created_by, dc.started_at,
+			dc.collecting_since, dc.ends_at, dc.finished_at, dc.suggestion_id, dc.lines_count, dc.message,
+			dc.start_command_id, dc.stop_command_id, dc.stop_sent_at
+		FROM domain_collections dc
+		LEFT JOIN suggested_modules sm ON sm.id = dc.suggestion_id
+		WHERE ($1 = '' OR dc.agent_id = $1)
+		  AND NOT (dc.status = 'done' AND (dc.suggestion_id IS NULL OR sm.status IN ('approved', 'rejected')))
+		ORDER BY (dc.status IN ('starting', 'collecting', 'stopping')) DESC, dc.started_at DESC
+		LIMIT $2
+	`, agentID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list collections: %w", err)
+	}
+	defer rows.Close()
+	out := []Collection{}
+	for rows.Next() {
+		c, err := scanCollection(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan collection: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) ListActiveCollections(ctx context.Context) ([]Collection, error) {
