@@ -137,6 +137,9 @@ const en: Dict = {
   denials: {
     searchPlaceholder: "Search (command, path, context…)",
     empty: "No denials match these filters.",
+    fixButton: "Fix on this machine",
+    confirmFix: "Ask this agent to generate a suggested rule (audit2allow) for this denial? It will never be installed automatically — you'll review and approve it on the Suggestions page.",
+    fixRequested: "Suggestion requested",
   },
   matrix: {
     title: "Denial matrix",
@@ -321,6 +324,9 @@ const fr: Dict = {
   denials: {
     searchPlaceholder: "Rechercher (commande, chemin, contexte…)",
     empty: "Aucun denial ne correspond à ces filtres.",
+    fixButton: "Corriger sur cette machine",
+    confirmFix: "Demander à cet agent de générer une règle suggérée (audit2allow) pour cette denial ? Elle ne sera jamais installée automatiquement — tu la relis et l'approuves depuis la page Suggestions.",
+    fixRequested: "Suggestion demandée",
   },
   matrix: {
     title: "Matrice des denials",
@@ -505,6 +511,9 @@ const es: Dict = {
   denials: {
     searchPlaceholder: "Buscar (comando, ruta, contexto…)",
     empty: "Ninguna denegación coincide con estos filtros.",
+    fixButton: "Corregir en esta máquina",
+    confirmFix: "¿Pedir a este agente que genere una regla sugerida (audit2allow) para esta denegación? Nunca se instalará automáticamente — la revisarás y aprobarás en la página Sugerencias.",
+    fixRequested: "Sugerencia solicitada",
   },
   matrix: {
     title: "Matriz de denegaciones",

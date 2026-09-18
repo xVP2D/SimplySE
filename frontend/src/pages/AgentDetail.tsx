@@ -19,6 +19,8 @@ export function AgentDetail() {
   const [correlateSources, setCorrelateSources] = useState<string[]>([]);
   const [correlating, setCorrelating] = useState(false);
   const [correlatedEvents, setCorrelatedEvents] = useState<CorrelatedEvent[] | null>(null);
+  const [suggesting, setSuggesting] = useState<number | null>(null);
+  const [suggested, setSuggested] = useState<Set<number>>(new Set());
   const [switchingMode, setSwitchingMode] = useState(false);
   const [switchingBoolean, setSwitchingBoolean] = useState<string | null>(null);
   const [booleanFilter, setBooleanFilter] = useState("");
@@ -71,6 +73,26 @@ export function AgentDetail() {
       setCorrelatedEvents([]);
     } finally {
       setCorrelating(false);
+    }
+  };
+
+  const requestFix = async (i: number, d: AvcEventHit) => {
+    if (!window.confirm(t("denials.confirmFix"))) return;
+    setSuggesting(i);
+    try {
+      await api.suggestModuleForDenial({
+        agentId: d.agent_id,
+        scontext: d.scontext,
+        tcontext: d.tcontext,
+        tclass: d.tclass,
+        rawLine: d.raw_line,
+      });
+      setSuggested((prev) => new Set(prev).add(i));
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSuggesting(null);
     }
   };
 
@@ -493,6 +515,25 @@ export function AgentDetail() {
                       }}
                     >
                       <div>{d.raw_line}</div>
+                      <div style={{ marginTop: 8.4 }}>
+                        {suggested.has(i) ? (
+                          <Link to="/suggestions" className="tag tag-accent">
+                            {t("denials.fixRequested")}
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            disabled={suggesting === i}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              requestFix(i, d);
+                            }}
+                          >
+                            {suggesting === i ? "…" : t("denials.fixButton")}
+                          </button>
+                        )}
+                      </div>
                       {correlateSources.length > 0 && (
                         <div style={{ marginTop: 8.4, borderTop: "1px solid var(--color-divider)", paddingTop: 8.4 }}>
                           <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4.2 }}>

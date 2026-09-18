@@ -71,6 +71,7 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/denials/top", a.topSignatures)
 	mux.HandleFunc("GET /api/denials/matrix", a.denialMatrix)
 	mux.HandleFunc("GET /api/denials/trend", a.denialTrend)
+	mux.HandleFunc("POST /api/denials/suggest", a.suggestModuleForDenial)
 	mux.HandleFunc("GET /api/suggested-modules", a.listSuggestedModules)
 	mux.HandleFunc("GET /api/suggested-modules/{id}", a.getSuggestedModule)
 	mux.HandleFunc("POST /api/suggested-modules/{id}/approve", a.approveSuggestedModule)
@@ -336,6 +337,38 @@ func (a *API) denialTrend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, points)
+}
+
+type suggestModuleForDenialRequest struct {
+	AgentID  string `json:"agent_id"`
+	SContext string `json:"scontext"`
+	TContext string `json:"tcontext"`
+	TClass   string `json:"tclass"`
+	RawLine  string `json:"raw_line"`
+}
+
+// suggestModuleForDenial is the "fix this on this machine" button on a
+// denial row: an operator-triggered equivalent of the automatic
+// new_signature suggestion, for a denial that's already been seen before
+// (so it never got one automatically) or one the operator just wants
+// addressed now rather than waiting. Same generation-only guarantee: see
+// server.RequestModuleSuggestion.
+func (a *API) suggestModuleForDenial(w http.ResponseWriter, r *http.Request) {
+	var req suggestModuleForDenialRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.AgentID == "" || req.SContext == "" || req.TContext == "" || req.TClass == "" || req.RawLine == "" {
+		writeError(w, http.StatusBadRequest, errors.New("agent_id, scontext, tcontext, tclass and raw_line are required"))
+		return
+	}
+	m, err := server.RequestModuleSuggestion(r.Context(), a.Store, a.Hub, req.AgentID, req.SContext, req.TContext, req.TClass, req.RawLine)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, m)
 }
 
 func (a *API) listSuggestedModules(w http.ResponseWriter, r *http.Request) {

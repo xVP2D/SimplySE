@@ -201,6 +201,17 @@ export const api = {
     }),
   rejectSuggestedModule: (id: string) =>
     request<{ status: string }>(`/suggested-modules/${id}/reject`, { method: "POST", body: JSON.stringify({}) }),
+  suggestModuleForDenial: (params: { agentId: string; scontext: string; tcontext: string; tclass: string; rawLine: string }) =>
+    request<SuggestedModule>("/denials/suggest", {
+      method: "POST",
+      body: JSON.stringify({
+        agent_id: params.agentId,
+        scontext: params.scontext,
+        tcontext: params.tcontext,
+        tclass: params.tclass,
+        raw_line: params.rawLine,
+      }),
+    }),
   recentCommands: (params: { agentId?: string; status?: string; offset?: number; limit?: number } = {}) => {
     const qs = new URLSearchParams();
     if (params.agentId) qs.set("agent_id", params.agentId);

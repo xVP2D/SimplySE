@@ -19,6 +19,28 @@ export function Denials() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [suggesting, setSuggesting] = useState<number | null>(null);
+  const [suggested, setSuggested] = useState<Set<number>>(new Set());
+
+  const requestFix = async (i: number, d: AvcEventHit) => {
+    if (!window.confirm(t("denials.confirmFix"))) return;
+    setSuggesting(i);
+    try {
+      await api.suggestModuleForDenial({
+        agentId: d.agent_id,
+        scontext: d.scontext,
+        tcontext: d.tcontext,
+        tclass: d.tclass,
+        rawLine: d.raw_line,
+      });
+      setSuggested((prev) => new Set(prev).add(i));
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSuggesting(null);
+    }
+  };
 
   const agentsByID = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
@@ -126,6 +148,7 @@ export function Denials() {
               <th>{t("common.columns.classPerm")}</th>
               <th>{t("common.columns.command")}</th>
               <th>{t("common.columns.path")}</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -152,11 +175,27 @@ export function Denials() {
                 <td style={{ fontSize: 12.5, color: "var(--color-neutral-400)", maxWidth: 300, wordBreak: "break-word" }}>
                   {d.path}
                 </td>
+                <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                  {suggested.has(i) ? (
+                    <Link to="/suggestions" className="tag tag-accent">
+                      {t("denials.fixRequested")}
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={suggesting === i}
+                      onClick={() => requestFix(i, d)}
+                    >
+                      {suggesting === i ? "…" : t("denials.fixButton")}
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
             {events.length === 0 && !loading && (
               <tr>
-                <td colSpan={6} style={{ color: "var(--color-neutral-500)" }}>
+                <td colSpan={7} style={{ color: "var(--color-neutral-500)" }}>
                   {t("denials.empty")}
                 </td>
               </tr>

@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	selinuxv1 "console-selinux/master/internal/gen/selinuxv1"
+	"console-selinux/master/internal/rules"
 	"console-selinux/master/internal/store/postgres"
 )
 
@@ -52,4 +54,30 @@ func DispatchCommand(ctx context.Context, store *postgres.Store, hub *Hub, agent
 	}
 	cmd.Status = "sent"
 	return cmd, nil
+}
+
+// RequestModuleSuggestion dispatches a suggest_module command for one
+// specific denial (identified by its raw audit line) to agentID, and
+// creates the tracking row the Suggestions page reads. This is the single
+// place audit2allow generation is ever triggered from — both
+// automatically, the moment a new_signature alert fires (see main.go),
+// and on explicit operator request (the "fix this on this machine" button
+// on a denial row, POST /api/denials/suggest) — so there's exactly one
+// code path to reason about for how a suggestion comes to exist.
+// Generation only: never installs anything by itself (see the proto's
+// SUGGEST_MODULE comment and the agent's action::suggest_module).
+func RequestModuleSuggestion(ctx context.Context, store *postgres.Store, hub *Hub, agentID, scontext, tcontext, tclass, rawLine string) (postgres.SuggestedModule, error) {
+	moduleName := rules.SuggestedModuleName(rules.Observation{SContext: scontext, TContext: tcontext, TClass: tclass})
+	payloadJSON, err := json.Marshal(map[string]any{
+		"raw_lines":   []string{rawLine},
+		"module_name": moduleName,
+	})
+	if err != nil {
+		return postgres.SuggestedModule{}, fmt.Errorf("marshal suggest_module payload: %w", err)
+	}
+	cmd, err := DispatchCommand(ctx, store, hub, agentID, nil, "suggest_module", string(payloadJSON))
+	if err != nil {
+		return postgres.SuggestedModule{}, fmt.Errorf("dispatch suggest_module: %w", err)
+	}
+	return store.CreateSuggestedModule(ctx, cmd.ID, agentID, moduleName, scontext, tcontext, tclass)
 }

@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -188,23 +187,11 @@ func run(log *slog.Logger) error {
 			// A signature never seen before is exactly the case audit2allow
 			// assistance is for: generate a suggested module right away so
 			// an operator has something to review without waiting for it
-			// to recur. Generation only (see proto's SUGGEST_MODULE comment
-			// and agent's action::suggest_module) — this never installs
-			// anything on its own.
+			// to recur (the same request an operator can also trigger by
+			// hand from a denial row — see server.RequestModuleSuggestion).
 			if alert.Type == "new_signature" {
-				moduleName := rules.SuggestedModuleName(rules.Observation{
-					SContext: m.SContext, TContext: m.TContext, TClass: m.TClass,
-				})
-				payloadJSON, err := json.Marshal(map[string]any{
-					"raw_lines":   []string{m.RawLine},
-					"module_name": moduleName,
-				})
-				if err != nil {
-					log.Error("marshal suggest_module payload failed", "error", err)
-				} else if cmd, err := server.DispatchCommand(ctx, pg, hub, m.AgentID, nil, "suggest_module", string(payloadJSON)); err != nil {
-					log.Error("dispatch suggest_module failed", "agent_id", m.AgentID, "error", err)
-				} else if _, err := pg.CreateSuggestedModule(ctx, cmd.ID, m.AgentID, moduleName, m.SContext, m.TContext, m.TClass); err != nil {
-					log.Error("create suggested module failed", "agent_id", m.AgentID, "error", err)
+				if _, err := server.RequestModuleSuggestion(ctx, pg, hub, m.AgentID, m.SContext, m.TContext, m.TClass, m.RawLine); err != nil {
+					log.Error("request module suggestion failed", "agent_id", m.AgentID, "error", err)
 				}
 			}
 		}
