@@ -27,3 +27,4 @@ deploy/certs/
 # OS / editors
 .DS_Store
 *.swp
+.claude/scheduled_tasks.lock
