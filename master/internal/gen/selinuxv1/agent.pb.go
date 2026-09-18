@@ -39,6 +39,14 @@ const (
 	// `message` field, JSON-encoded as {"te":"...","pp_base64":"..."}.
 	// payload: {"raw_lines":["type=AVC msg=audit(...): ..."],"module_name":"..."}
 	CommandType_COMMAND_TYPE_SUGGEST_MODULE CommandType = 5
+	// The two below only ever come from an operator explicitly deleting an
+	// applied rule in the dashboard (master/internal/server/revert.go), to
+	// undo an INSTALL_MODULE / CHCON on the machine itself.
+	// Runs `semodule -r <name>`. payload: {"name":"..."}
+	CommandType_COMMAND_TYPE_REMOVE_MODULE CommandType = 6
+	// Runs `restorecon -v [-R] -- <path>`, i.e. resets the path to the
+	// policy's default context. payload: {"path":"/abs/path","recursive":false}
+	CommandType_COMMAND_TYPE_RESTORECON CommandType = 7
 )
 
 // Enum value maps for CommandType.
@@ -50,6 +58,8 @@ var (
 		3: "COMMAND_TYPE_INSTALL_MODULE",
 		4: "COMMAND_TYPE_CHCON",
 		5: "COMMAND_TYPE_SUGGEST_MODULE",
+		6: "COMMAND_TYPE_REMOVE_MODULE",
+		7: "COMMAND_TYPE_RESTORECON",
 	}
 	CommandType_value = map[string]int32{
 		"COMMAND_TYPE_UNSPECIFIED":    0,
@@ -58,6 +68,8 @@ var (
 		"COMMAND_TYPE_INSTALL_MODULE": 3,
 		"COMMAND_TYPE_CHCON":          4,
 		"COMMAND_TYPE_SUGGEST_MODULE": 5,
+		"COMMAND_TYPE_REMOVE_MODULE":  6,
+		"COMMAND_TYPE_RESTORECON":     7,
 	}
 )
 
@@ -1000,14 +1012,16 @@ const file_proto_selinux_v1_agent_proto_rawDesc = "" +
 	"\x04type\x18\x02 \x01(\x0e2\x17.selinux.v1.CommandTypeR\x04type\x12!\n" +
 	"\fpayload_json\x18\x03 \x01(\tR\vpayloadJson\"4\n" +
 	"\fHeartbeatAck\x12$\n" +
-	"\x0eserver_ts_unix\x18\x01 \x01(\x03R\fserverTsUnix*\xbe\x01\n" +
+	"\x0eserver_ts_unix\x18\x01 \x01(\x03R\fserverTsUnix*\xfb\x01\n" +
 	"\vCommandType\x12\x1c\n" +
 	"\x18COMMAND_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15COMMAND_TYPE_SET_MODE\x10\x01\x12\x1c\n" +
 	"\x18COMMAND_TYPE_SET_BOOLEAN\x10\x02\x12\x1f\n" +
 	"\x1bCOMMAND_TYPE_INSTALL_MODULE\x10\x03\x12\x16\n" +
 	"\x12COMMAND_TYPE_CHCON\x10\x04\x12\x1f\n" +
-	"\x1bCOMMAND_TYPE_SUGGEST_MODULE\x10\x052O\n" +
+	"\x1bCOMMAND_TYPE_SUGGEST_MODULE\x10\x05\x12\x1e\n" +
+	"\x1aCOMMAND_TYPE_REMOVE_MODULE\x10\x06\x12\x1b\n" +
+	"\x17COMMAND_TYPE_RESTORECON\x10\a2O\n" +
 	"\tAgentLink\x12B\n" +
 	"\aSession\x12\x18.selinux.v1.AgentMessage\x1a\x19.selinux.v1.ServerMessage(\x010\x01B9Z7console-selinux/master/internal/gen/selinuxv1;selinuxv1b\x06proto3"
 

@@ -16,18 +16,35 @@ var commandTypeByName = map[string]selinuxv1.CommandType{
 	"install_module": selinuxv1.CommandType_COMMAND_TYPE_INSTALL_MODULE,
 	"chcon":          selinuxv1.CommandType_COMMAND_TYPE_CHCON,
 	"suggest_module": selinuxv1.CommandType_COMMAND_TYPE_SUGGEST_MODULE,
+	"remove_module":  selinuxv1.CommandType_COMMAND_TYPE_REMOVE_MODULE,
+	"restorecon":     selinuxv1.CommandType_COMMAND_TYPE_RESTORECON,
 }
 
 // DispatchCommand persists a command for agentID and, if the agent is
 // currently connected, sends it immediately over its gRPC stream. The
 // command row is created either way so the operator can see it queued.
 func DispatchCommand(ctx context.Context, store *postgres.Store, hub *Hub, agentID string, ruleID *string, cmdType, payloadJSON string) (postgres.Command, error) {
-	protoType, ok := commandTypeByName[cmdType]
+	n := postgres.NewCommand{AgentID: agentID, RuleID: ruleID, Type: cmdType, PayloadJSON: payloadJSON}
+	// Record how to undo it before it runs: the previous boolean value /
+	// mode / "was this module already installed" is only knowable now.
+	if plan := planUndo(ctx, store, agentID, cmdType, payloadJSON); plan != nil {
+		encoded, err := json.Marshal(plan)
+		if err != nil {
+			return postgres.Command{}, fmt.Errorf("marshal undo plan: %w", err)
+		}
+		n.UndoJSON = string(encoded)
+	}
+	return dispatch(ctx, store, hub, n)
+}
+
+// dispatch persists n and sends it if the agent is connected.
+func dispatch(ctx context.Context, store *postgres.Store, hub *Hub, n postgres.NewCommand) (postgres.Command, error) {
+	protoType, ok := commandTypeByName[n.Type]
 	if !ok {
-		return postgres.Command{}, fmt.Errorf("unknown command type %q", cmdType)
+		return postgres.Command{}, fmt.Errorf("unknown command type %q", n.Type)
 	}
 
-	cmd, err := store.CreateCommand(ctx, agentID, ruleID, cmdType, payloadJSON)
+	cmd, err := store.CreateCommandWith(ctx, n)
 	if err != nil {
 		return postgres.Command{}, err
 	}
@@ -37,12 +54,12 @@ func DispatchCommand(ctx context.Context, store *postgres.Store, hub *Hub, agent
 			Command: &selinuxv1.Command{
 				CommandId:   cmd.ID,
 				Type:        protoType,
-				PayloadJson: payloadJSON,
+				PayloadJson: n.PayloadJSON,
 			},
 		},
 	}
 
-	if err := hub.Dispatch(agentID, msg); err != nil {
+	if err := hub.Dispatch(n.AgentID, msg); err != nil {
 		// Not connected right now: the command stays "pending" and will
 		// need to be resent once the agent reconnects (follow-up: a
 		// reconnect hook that flushes pending commands).

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Agent, type Command } from "../lib/api";
 import { formatPayload, statusTagClass } from "../lib/commandFormat";
+import { RevertButton } from "../components/RevertButton";
 import { useTranslation } from "../i18n";
 
 const PAGE_SIZE = 20;
@@ -20,6 +21,16 @@ export function Deployments() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+
+  // While an undo is in flight, keep refreshing so the entry disappears as
+  // soon as the agent confirms it.
+  const anyRevertPending = commands.some((c) => c.revert_pending);
+  useEffect(() => {
+    if (!anyRevertPending) return;
+    const timer = setInterval(() => setReloadTick((n) => n + 1), 2000);
+    return () => clearInterval(timer);
+  }, [anyRevertPending]);
 
   const agentsByID = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
@@ -51,7 +62,7 @@ export function Deployments() {
     return () => {
       cancelled = true;
     };
-  }, [agentId, status, offset]);
+  }, [agentId, status, offset, reloadTick]);
 
   const setFilter = (key: "agent" | "status", value: string) => {
     setSearchParams((prev) => {
@@ -112,6 +123,7 @@ export function Deployments() {
               <th>{t("common.columns.parameters")}</th>
               <th>{t("common.columns.status")}</th>
               <th>{t("common.columns.message")}</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -133,11 +145,18 @@ export function Deployments() {
                 <td style={{ fontSize: 12, color: "var(--color-neutral-500)", maxWidth: 320 }}>
                   <div style={{ maxHeight: 90, overflowY: "auto", wordBreak: "break-all" }}>{c.result_message}</div>
                 </td>
+                <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                  <RevertButton
+                    command={c}
+                    host={agentsByID.get(c.agent_id)?.hostname || c.agent_id}
+                    onChanged={() => setReloadTick((n) => n + 1)}
+                  />
+                </td>
               </tr>
             ))}
             {commands.length === 0 && !loading && (
               <tr>
-                <td colSpan={6} style={{ color: "var(--color-neutral-500)" }}>
+                <td colSpan={7} style={{ color: "var(--color-neutral-500)" }}>
                   {t("deployments.empty")}
                 </td>
               </tr>

@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, type Agent, type AvcEventHit, type Command, type CorrelatedEvent, type SelinuxState } from "../lib/api";
 import { DeployRuleDialog } from "../components/DeployRuleDialog";
 import { formatPayload, statusTagClass } from "../lib/commandFormat";
+import { RevertButton } from "../components/RevertButton";
 import { explainDenial } from "../lib/explainDenial";
 import { randomUUID } from "../lib/uuid";
 import { useTranslation } from "../i18n";
@@ -249,6 +250,7 @@ export function AgentDetail() {
                 <th>{t("common.columns.parameters")}</th>
                 <th>{t("common.columns.status")}</th>
                 <th>{t("common.columns.message")}</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -267,11 +269,14 @@ export function AgentDetail() {
                   <td style={{ fontSize: 12, color: "var(--color-neutral-500)", maxWidth: 260 }}>
                     <div style={{ maxHeight: 90, overflowY: "auto", wordBreak: "break-all" }}>{c.result_message}</div>
                   </td>
+                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    <RevertButton command={c} host={agent.hostname || agent.id} onChanged={load} />
+                  </td>
                 </tr>
               ))}
               {commands.length === 0 && (
                 <tr>
-                  <td colSpan={5} style={{ color: "var(--color-neutral-500)" }}>
+                  <td colSpan={6} style={{ color: "var(--color-neutral-500)" }}>
                     {t("agentDetail.noRulesYet")}
                   </td>
                 </tr>

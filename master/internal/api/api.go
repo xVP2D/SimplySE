@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -88,6 +89,7 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/rules/deploy", a.deployRule)
 	mux.HandleFunc("GET /api/commands/{id}", a.getCommand)
 	mux.HandleFunc("GET /api/commands/recent", a.listRecentCommands)
+	mux.HandleFunc("POST /api/commands/{id}/revert", a.revertCommand)
 	mux.HandleFunc("GET /api/alerts", a.listAlerts)
 	mux.HandleFunc("POST /api/alerts/{id}/ack", a.acknowledgeAlert)
 	mux.HandleFunc("GET /api/enroll/{file}", a.enroll)
@@ -626,6 +628,17 @@ func hashIdempotentRequest(method, path string, body []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// commandView is a command plus what its Delete button does (see
+// server.DescribeRevert): flattened into one JSON object.
+type commandView struct {
+	postgres.Command
+	server.RevertInfo
+}
+
+func newCommandView(c postgres.Command) commandView {
+	return commandView{Command: c, RevertInfo: server.DescribeRevert(c)}
+}
+
 func (a *API) getCommand(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	cmd, err := a.Store.GetCommand(r.Context(), id)
@@ -633,7 +646,36 @@ func (a *API) getCommand(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, cmd)
+	writeJSON(w, http.StatusOK, newCommandView(cmd))
+}
+
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// revertCommand backs the Delete button on an applied rule: it undoes the
+// rule on the machine (asynchronously — 202, the entry disappears once the
+// agent confirms), or just removes the entry when nothing was applied.
+func (a *API) revertCommand(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, errors.New("invalid command id"))
+		return
+	}
+	res, err := server.RevertCommand(r.Context(), a.Store, a.Hub, id)
+	var notRevertible *server.NotRevertibleError
+	switch {
+	case err == nil && res.Deleted:
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	case err == nil:
+		writeJSON(w, http.StatusAccepted, map[string]any{"status": "reverting", "command": newCommandView(*res.Undo)})
+	case errors.Is(err, server.ErrCommandNotFound):
+		writeError(w, http.StatusNotFound, err)
+	case errors.Is(err, server.ErrAgentOffline), errors.Is(err, postgres.ErrRevertInProgress):
+		writeError(w, http.StatusConflict, err)
+	case errors.As(err, &notRevertible):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "reason": notRevertible.Reason})
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
 }
 
 func (a *API) listRecentCommands(w http.ResponseWriter, r *http.Request) {
@@ -647,7 +689,11 @@ func (a *API) listRecentCommands(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	views := make([]commandView, 0, len(result.Commands))
+	for _, c := range result.Commands {
+		views = append(views, newCommandView(c))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"commands": views, "total": result.Total})
 }
 
 func (a *API) listAlerts(w http.ResponseWriter, r *http.Request) {

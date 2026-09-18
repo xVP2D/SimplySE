@@ -33,6 +33,11 @@ export interface Command {
   result_message: string;
   created_at: string;
   acked_at?: string;
+  // What the Delete button does for this command (see RevertButton).
+  revert?: "machine" | "record" | "none";
+  revert_reason?: string;
+  revert_action?: string;
+  revert_pending?: boolean;
 }
 
 export interface AvcEventHit {
@@ -285,6 +290,8 @@ export const api = {
     qs.set("limit", String(params.limit ?? 20));
     return request<CommandSearchResult>(`/commands/recent?${qs.toString()}`);
   },
+  revertCommand: (id: string) =>
+    request<{ status: "deleted" | "reverting" }>(`/commands/${id}/revert`, { method: "POST", body: JSON.stringify({}) }),
   getCommand: (id: string) => request<Command>(`/commands/${id}`),
   listAlerts: (params: { status?: string; severity?: string; offset?: number; limit?: number } = {}) => {
     const qs = new URLSearchParams();

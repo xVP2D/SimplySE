@@ -41,6 +41,18 @@ CREATE TABLE IF NOT EXISTS commands (
     acked_at        TIMESTAMPTZ
 );
 
+-- How to undo this command on the machine, recorded when it was dispatched
+-- (JSON {"type","payload","action"}; NULL = not revertible or unknown — see
+-- internal/server/revert.go). reverts_command_id marks a command that is
+-- itself the undo of another: when it is acked successfully, both rows are
+-- removed. ON DELETE SET NULL so removing an original never trips the FK.
+ALTER TABLE commands ADD COLUMN IF NOT EXISTS undo_json JSONB;
+ALTER TABLE commands ADD COLUMN IF NOT EXISTS reverts_command_id UUID REFERENCES commands(id) ON DELETE SET NULL;
+-- At most one undo in flight per command (double-click / two operators).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_commands_one_inflight_revert
+    ON commands (reverts_command_id)
+    WHERE reverts_command_id IS NOT NULL AND status IN ('pending', 'sent');
+
 CREATE INDEX IF NOT EXISTS idx_commands_agent_id ON commands (agent_id);
 CREATE INDEX IF NOT EXISTS idx_commands_created_at ON commands (created_at DESC);
 

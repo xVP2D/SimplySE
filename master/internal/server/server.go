@@ -136,6 +136,7 @@ func (s *AgentLinkServer) handleIncoming(ctx context.Context, agentID string, ms
 			s.Log.Error("update command ack failed", "command_id", ack.GetCommandId(), "error", err)
 		}
 		s.completeSuggestionIfApplicable(ctx, ack)
+		s.completeRevertIfApplicable(ctx, ack.GetCommandId(), ack.GetSuccess(), ack.GetMessage())
 
 	case *selinuxv1.AgentMessage_SelinuxInventory:
 		inv := p.SelinuxInventory

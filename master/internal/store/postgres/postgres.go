@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -175,20 +176,101 @@ type Command struct {
 	ResultMessage string     `json:"result_message"`
 	CreatedAt     time.Time  `json:"created_at"`
 	AckedAt       *time.Time `json:"acked_at,omitempty"`
+
+	// UndoJSON is the recorded way to undo this command on the machine
+	// ("" = none/unknown). Internal: the API exposes a derived summary
+	// instead (see server.DescribeRevert).
+	UndoJSON string `json:"-"`
+	// RevertsCommandID is set on a command that is itself the undo of
+	// another one.
+	RevertsCommandID *string `json:"reverts_command_id,omitempty"`
+	// RevertPending: an undo of this command is currently in flight.
+	RevertPending bool `json:"revert_pending"`
 }
 
-func (s *Store) CreateCommand(ctx context.Context, agentID string, ruleID *string, cmdType, payloadJSON string) (Command, error) {
+// commandColumns/scanCommand keep GetCommand and ListCommands reading the
+// same columns in the same order.
+const commandColumns = `c.id, c.agent_id, c.rule_id, c.type, c.payload_json, c.status, c.result_message,
+	c.created_at, c.acked_at, COALESCE(c.undo_json::text, ''), c.reverts_command_id,
+	EXISTS (SELECT 1 FROM commands r WHERE r.reverts_command_id = c.id AND r.status IN ('pending', 'sent'))`
+
+func scanCommand(row interface{ Scan(...any) error }, extra ...any) (Command, error) {
 	var c Command
-	c.AgentID, c.RuleID, c.Type, c.PayloadJSON = agentID, ruleID, cmdType, payloadJSON
+	dest := append([]any{&c.ID, &c.AgentID, &c.RuleID, &c.Type, &c.PayloadJSON, &c.Status, &c.ResultMessage,
+		&c.CreatedAt, &c.AckedAt, &c.UndoJSON, &c.RevertsCommandID, &c.RevertPending}, extra...)
+	err := row.Scan(dest...)
+	return c, err
+}
+
+// NewCommand describes a command to persist. UndoJSON and RevertsCommandID
+// are optional (see Command).
+type NewCommand struct {
+	AgentID          string
+	RuleID           *string
+	Type             string
+	PayloadJSON      string
+	UndoJSON         string
+	RevertsCommandID *string
+}
+
+// ErrRevertInProgress: an undo of that command is already pending/sent.
+var ErrRevertInProgress = errors.New("an undo of this command is already in progress")
+
+func (s *Store) CreateCommand(ctx context.Context, agentID string, ruleID *string, cmdType, payloadJSON string) (Command, error) {
+	return s.CreateCommandWith(ctx, NewCommand{AgentID: agentID, RuleID: ruleID, Type: cmdType, PayloadJSON: payloadJSON})
+}
+
+func (s *Store) CreateCommandWith(ctx context.Context, n NewCommand) (Command, error) {
+	c := Command{AgentID: n.AgentID, RuleID: n.RuleID, Type: n.Type, PayloadJSON: n.PayloadJSON,
+		UndoJSON: n.UndoJSON, RevertsCommandID: n.RevertsCommandID}
+	var undo any
+	if n.UndoJSON != "" {
+		undo = n.UndoJSON
+	}
 	err := s.db.QueryRowContext(ctx, `
-		INSERT INTO commands (agent_id, rule_id, type, payload_json)
-		VALUES ($1, $2, $3, $4::jsonb)
+		INSERT INTO commands (agent_id, rule_id, type, payload_json, undo_json, reverts_command_id)
+		VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
 		RETURNING id, status, created_at
-	`, agentID, ruleID, cmdType, payloadJSON).Scan(&c.ID, &c.Status, &c.CreatedAt)
+	`, n.AgentID, n.RuleID, n.Type, n.PayloadJSON, undo, n.RevertsCommandID).Scan(&c.ID, &c.Status, &c.CreatedAt)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && n.RevertsCommandID != nil {
+			return Command{}, ErrRevertInProgress
+		}
 		return Command{}, fmt.Errorf("create command: %w", err)
 	}
 	return c, nil
+}
+
+// ExpireStaleReverts fails undo commands for originalID that have been
+// pending/sent for over two minutes with no answer (agent went away), so a
+// lost undo can be retried instead of blocking the unique in-flight guard
+// forever.
+func (s *Store) ExpireStaleReverts(ctx context.Context, originalID string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE commands SET status = 'failed', acked_at = now(),
+			result_message = 'no response from the agent (timed out)'
+		WHERE reverts_command_id = $1 AND status IN ('pending', 'sent')
+		  AND created_at < now() - interval '2 minutes'
+	`, originalID)
+	if err != nil {
+		return fmt.Errorf("expire stale reverts: %w", err)
+	}
+	return nil
+}
+
+// DeleteCommandAndReverts removes a command together with any undo commands
+// that point at it, in one statement.
+func (s *Store) DeleteCommandAndReverts(ctx context.Context, id string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM commands WHERE id = $1 OR reverts_command_id = $1`, id)
+	if err != nil {
+		return false, fmt.Errorf("delete command: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("delete command: %w", err)
+	}
+	return n > 0, nil
 }
 
 func (s *Store) MarkCommandSent(ctx context.Context, id string) error {
@@ -214,11 +296,7 @@ func (s *Store) UpdateCommandAck(ctx context.Context, id string, success bool, m
 }
 
 func (s *Store) GetCommand(ctx context.Context, id string) (Command, error) {
-	var c Command
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, agent_id, rule_id, type, payload_json, status, result_message, created_at, acked_at
-		FROM commands WHERE id = $1
-	`, id).Scan(&c.ID, &c.AgentID, &c.RuleID, &c.Type, &c.PayloadJSON, &c.Status, &c.ResultMessage, &c.CreatedAt, &c.AckedAt)
+	c, err := scanCommand(s.db.QueryRowContext(ctx, `SELECT `+commandColumns+` FROM commands c WHERE c.id = $1`, id))
 	if err != nil {
 		return Command{}, fmt.Errorf("get command %s: %w", id, err)
 	}
@@ -241,11 +319,10 @@ type ListCommandsResult struct {
 
 func (s *Store) ListCommands(ctx context.Context, opts ListCommandsOptions) (ListCommandsResult, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, agent_id, rule_id, type, payload_json, status, result_message, created_at, acked_at,
-			count(*) OVER() AS total
-		FROM commands
-		WHERE ($1 = '' OR agent_id = $1) AND ($2 = '' OR status = $2)
-		ORDER BY created_at DESC
+		SELECT `+commandColumns+`, count(*) OVER() AS total
+		FROM commands c
+		WHERE ($1 = '' OR c.agent_id = $1) AND ($2 = '' OR c.status = $2)
+		ORDER BY c.created_at DESC
 		LIMIT $3 OFFSET $4
 	`, opts.AgentID, opts.Status, opts.Limit, opts.Offset)
 	if err != nil {
@@ -255,8 +332,8 @@ func (s *Store) ListCommands(ctx context.Context, opts ListCommandsOptions) (Lis
 
 	result := ListCommandsResult{Commands: []Command{}} // never nil: encodes to `[]`, not `null`, when empty
 	for rows.Next() {
-		var c Command
-		if err := rows.Scan(&c.ID, &c.AgentID, &c.RuleID, &c.Type, &c.PayloadJSON, &c.Status, &c.ResultMessage, &c.CreatedAt, &c.AckedAt, &result.Total); err != nil {
+		c, err := scanCommand(rows, &result.Total)
+		if err != nil {
 			return ListCommandsResult{}, fmt.Errorf("scan command: %w", err)
 		}
 		result.Commands = append(result.Commands, c)

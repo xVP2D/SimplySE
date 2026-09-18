@@ -127,6 +127,14 @@ enum CommandType {
   // `message` field, JSON-encoded as {"te":"...","pp_base64":"..."}.
   // payload: {"raw_lines":["type=AVC msg=audit(...): ..."],"module_name":"..."}
   COMMAND_TYPE_SUGGEST_MODULE = 5;
+  // The two below only ever come from an operator explicitly deleting an
+  // applied rule in the dashboard (master/internal/server/revert.go), to
+  // undo an INSTALL_MODULE / CHCON on the machine itself.
+  // Runs `semodule -r <name>`. payload: {"name":"..."}
+  COMMAND_TYPE_REMOVE_MODULE = 6;
+  // Runs `restorecon -v [-R] -- <path>`, i.e. resets the path to the
+  // policy's default context. payload: {"path":"/abs/path","recursive":false}
+  COMMAND_TYPE_RESTORECON = 7;
 }
 
 message HeartbeatAck {

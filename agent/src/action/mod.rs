@@ -21,6 +21,8 @@ pub async fn execute(cmd: &pb::Command) -> (bool, String) {
         pb::CommandType::InstallModule => install_module(&cmd.payload_json).await,
         pb::CommandType::Chcon => chcon(&cmd.payload_json).await,
         pb::CommandType::SuggestModule => suggest_module(&cmd.payload_json).await,
+        pb::CommandType::RemoveModule => remove_module(&cmd.payload_json).await,
+        pb::CommandType::Restorecon => restorecon(&cmd.payload_json).await,
         pb::CommandType::Unspecified => (false, "unknown command type".to_string()),
     }
 }
@@ -122,6 +124,85 @@ async fn chcon(payload_json: &str) -> (bool, String) {
 
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     run_and_report("chcon", &arg_refs).await
+}
+
+#[derive(Deserialize)]
+struct RemoveModulePayload {
+    name: String,
+}
+
+/// A module name goes to `semodule -r` as a bare argument, so it must not be
+/// able to look like an option (leading `-`) or carry anything but the
+/// characters real module names use.
+fn is_safe_module_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let starts_ok = matches!(chars.next(), Some(c) if c.is_ascii_alphanumeric() || c == '_');
+    starts_ok
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+}
+
+/// Undo of an INSTALL_MODULE, only ever sent when an operator deletes an
+/// applied rule (see master/internal/server/revert.go).
+async fn remove_module(payload_json: &str) -> (bool, String) {
+    let payload: RemoveModulePayload = match serde_json::from_str(payload_json) {
+        Ok(p) => p,
+        Err(err) => return (false, format!("invalid payload: {err}")),
+    };
+    if !is_safe_module_name(&payload.name) {
+        return (false, format!("refusing unsafe module name {:?}", payload.name));
+    }
+    run_and_report("semodule", &["-r", &payload.name]).await
+}
+
+#[derive(Deserialize)]
+struct RestoreconPayload {
+    path: String,
+    #[serde(default)]
+    recursive: bool,
+}
+
+/// Undo of a CHCON: resets the path to the policy's default context (not
+/// necessarily the label it had before the chcon).
+async fn restorecon(payload_json: &str) -> (bool, String) {
+    let payload: RestoreconPayload = match serde_json::from_str(payload_json) {
+        Ok(p) => p,
+        Err(err) => return (false, format!("invalid payload: {err}")),
+    };
+    // Absolute only: a relative path could resolve against the agent's own
+    // working directory, and a leading `-` would read as an option.
+    if !payload.path.starts_with('/') {
+        return (false, format!("refusing non-absolute path {:?}", payload.path));
+    }
+
+    let mut args: Vec<&str> = vec!["-v"];
+    if payload.recursive {
+        args.push("-R");
+    }
+    args.push("--");
+    args.push(&payload.path);
+
+    match Command::new("restorecon").args(&args).output().await {
+        Ok(output) if output.status.success() => {
+            let relabeled = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if relabeled.is_empty() {
+                (true, "already the policy default context, nothing to change".to_string())
+            } else {
+                (true, relabeled)
+            }
+        }
+        Ok(output) => (
+            false,
+            format!(
+                "restorecon exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        ),
+        Err(err) => (false, format!("failed to run restorecon: {err}")),
+    }
 }
 
 #[derive(Deserialize)]
@@ -239,5 +320,40 @@ async fn run_and_report(program: &str, args: &[&str]) -> (bool, String) {
             ),
         ),
         Err(err) => (false, format!("failed to run {program}: {err}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn module_names_must_not_look_like_options_or_carry_odd_characters() {
+        assert!(is_safe_module_name("suggested_namedt_bint_file"));
+        assert!(is_safe_module_name("my-mod.v2"));
+        assert!(!is_safe_module_name(""));
+        assert!(!is_safe_module_name("-r"));
+        assert!(!is_safe_module_name("--help"));
+        assert!(!is_safe_module_name("a b"));
+        assert!(!is_safe_module_name("a;rm"));
+        assert!(!is_safe_module_name("../x"));
+        assert!(!is_safe_module_name(&"a".repeat(65)));
+    }
+
+    #[tokio::test]
+    async fn restorecon_refuses_relative_and_option_like_paths() {
+        for path in ["relative/path", "-R", ""] {
+            let payload = format!(r#"{{"path":{path:?},"recursive":false}}"#);
+            let (ok, message) = restorecon(&payload).await;
+            assert!(!ok, "{path:?} must be refused");
+            assert!(message.contains("non-absolute"), "{message}");
+        }
+    }
+
+    #[tokio::test]
+    async fn remove_module_refuses_unsafe_names_before_running_anything() {
+        let (ok, message) = remove_module(r#"{"name":"-r"}"#).await;
+        assert!(!ok);
+        assert!(message.contains("unsafe"), "{message}");
     }
 }

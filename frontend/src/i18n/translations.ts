@@ -163,6 +163,18 @@ const en: Dict = {
     trendTitle: "Denials per host over time",
     trendExplainer: "Last 14 days — a sudden jump right after a policy change is worth a look.",
   },
+  revert: {
+    delete: "Delete",
+    inProgress: "undoing…",
+    confirmMachine:
+      "Undo this rule on {host} and remove it from the list?\n\nWhat will run on the machine: {action}",
+    confirmRecord: "This command never took effect on the machine. Remove it from the list?",
+    reason: {
+      in_flight: "An undo, or the original command, is still in flight — wait for its result.",
+      unknown_previous: "The state before this rule wasn't recorded, so it can't be undone automatically.",
+      not_supported: "This kind of entry can't be removed.",
+    },
+  },
   deployments: {
     allStatuses: "All statuses",
     empty: "No deployments match these filters.",
@@ -387,6 +399,18 @@ const fr: Dict = {
     trendTitle: "Denials par hôte dans le temps",
     trendExplainer: "14 derniers jours — un pic juste après un changement de politique mérite d'être regardé.",
   },
+  revert: {
+    delete: "Supprimer",
+    inProgress: "annulation…",
+    confirmMachine:
+      "Annuler cette règle sur {host} et la retirer de la liste ?\n\nCe qui sera exécuté sur la machine : {action}",
+    confirmRecord: "Cette commande n'a jamais pris effet sur la machine. La retirer de la liste ?",
+    reason: {
+      in_flight: "Une annulation, ou la commande d'origine, est encore en cours — attendez son résultat.",
+      unknown_previous: "L'état d'avant cette règle n'a pas été enregistré : elle ne peut pas être annulée automatiquement.",
+      not_supported: "Ce type d'entrée ne peut pas être supprimé.",
+    },
+  },
   deployments: {
     allStatuses: "Tous les statuts",
     empty: "Aucun déploiement ne correspond à ces filtres.",
@@ -610,6 +634,18 @@ const es: Dict = {
     empty: "No se ha observado ninguna denegación en esta ventana.",
     trendTitle: "Denegaciones por host en el tiempo",
     trendExplainer: "Últimos 14 días — un pico justo después de un cambio de política merece revisión.",
+  },
+  revert: {
+    delete: "Eliminar",
+    inProgress: "deshaciendo…",
+    confirmMachine:
+      "¿Deshacer esta regla en {host} y quitarla de la lista?\n\nLo que se ejecutará en la máquina: {action}",
+    confirmRecord: "Este comando nunca tuvo efecto en la máquina. ¿Quitarlo de la lista?",
+    reason: {
+      in_flight: "Una anulación, o el comando original, sigue en curso — espere su resultado.",
+      unknown_previous: "El estado anterior a esta regla no se registró, así que no puede deshacerse automáticamente.",
+      not_supported: "Este tipo de entrada no puede eliminarse.",
+    },
   },
   deployments: {
     allStatuses: "Todos los estados",
