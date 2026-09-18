@@ -20,6 +20,7 @@ export function App() {
         <Route path="agents" element={<Agents />} />
         <Route path="agents/:id" element={<AgentDetail />} />
         <Route path="denials" element={<Denials />} />
+        <Route path="quarantine" element={<Denials quarantine />} />
         <Route path="matrix" element={<Matrix />} />
         <Route path="deployments" element={<Deployments />} />
         <Route path="compliance" element={<Compliance />} />

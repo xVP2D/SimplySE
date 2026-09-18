@@ -6,7 +6,9 @@ import { explainDenial } from "../lib/explainDenial";
 
 const PAGE_SIZE = 25;
 
-export function Denials() {
+// quarantine=true renders the Quarantine page: the same table, but listing
+// quarantined denials, with Restore instead of Fix/Quarantine.
+export function Denials({ quarantine = false }: { quarantine?: boolean }) {
   const { t, locale } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const agentId = searchParams.get("agent") ?? "";
@@ -19,12 +21,32 @@ export function Denials() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [suggesting, setSuggesting] = useState<number | null>(null);
-  const [suggested, setSuggested] = useState<Set<number>>(new Set());
+  const [suggesting, setSuggesting] = useState<string | null>(null);
+  const [suggested, setSuggested] = useState<Set<string>>(new Set());
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
 
-  const requestFix = async (i: number, d: AvcEventHit) => {
+  const runAction = async (d: AvcEventHit, action: () => Promise<unknown>) => {
+    setBusyId(d.id);
+    try {
+      await action();
+      setReloadTick((n) => n + 1);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const remove = (d: AvcEventHit) => {
+    if (!window.confirm(t("denials.confirmDelete"))) return;
+    runAction(d, () => api.deleteDenial(d));
+  };
+
+  const requestFix = async (id: string, d: AvcEventHit) => {
     if (!window.confirm(t("denials.confirmFix"))) return;
-    setSuggesting(i);
+    setSuggesting(id);
     try {
       await api.suggestModuleForDenial({
         agentId: d.agent_id,
@@ -33,7 +55,7 @@ export function Denials() {
         tclass: d.tclass,
         rawLine: d.raw_line,
       });
-      setSuggested((prev) => new Set(prev).add(i));
+      setSuggested((prev) => new Set(prev).add(id));
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -57,7 +79,7 @@ export function Denials() {
     let cancelled = false;
     setLoading(true);
     api
-      .listDenials({ agentId: agentId || undefined, query: queryParam || undefined, offset, limit: PAGE_SIZE })
+      .listDenials({ agentId: agentId || undefined, query: queryParam || undefined, quarantined: quarantine, offset, limit: PAGE_SIZE })
       .then((result) => {
         if (cancelled) return;
         setEvents(result.events ?? []);
@@ -73,7 +95,7 @@ export function Denials() {
     return () => {
       cancelled = true;
     };
-  }, [agentId, queryParam, offset]);
+  }, [agentId, queryParam, offset, quarantine, reloadTick]);
 
   // Debounce the free-text search before it becomes a URL param / API call.
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
@@ -104,6 +126,7 @@ export function Denials() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 11.2 }}>
+      {quarantine && <p style={{ margin: 0, fontSize: 12, color: "var(--color-neutral-500)" }}>{t("denials.quarantineExplainer")}</p>}
       <div
         style={{
           display: "flex",
@@ -152,8 +175,8 @@ export function Denials() {
             </tr>
           </thead>
           <tbody>
-            {events.map((d, i) => (
-              <tr key={i}>
+            {events.map((d) => (
+              <tr key={d.id}>
                 <td style={{ fontSize: 12, color: "var(--color-neutral-500)", whiteSpace: "nowrap" }}>
                   {new Date(d.timestamp).toLocaleString(locale)}
                 </td>
@@ -176,27 +199,51 @@ export function Denials() {
                   {d.path}
                 </td>
                 <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
-                  {suggested.has(i) ? (
-                    <Link to="/suggestions" className="tag tag-accent">
-                      {t("denials.fixRequested")}
-                    </Link>
-                  ) : (
+                  {quarantine ? (
                     <button
                       type="button"
-                      className="btn btn-ghost"
-                      disabled={suggesting === i}
-                      onClick={() => requestFix(i, d)}
+                      className="btn btn-secondary"
+                      disabled={busyId === d.id}
+                      onClick={() => runAction(d, () => api.restoreDenial(d))}
                     >
-                      {suggesting === i ? "…" : t("denials.fixButton")}
+                      {t("denials.restore")}
                     </button>
+                  ) : (
+                    <>
+                      {suggested.has(d.id) ? (
+                        <Link to="/suggestions" className="tag tag-accent">
+                          {t("denials.fixRequested")}
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          disabled={suggesting === d.id}
+                          onClick={() => requestFix(d.id, d)}
+                        >
+                          {suggesting === d.id ? "…" : t("denials.fixButton")}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        disabled={busyId === d.id}
+                        onClick={() => runAction(d, () => api.quarantineDenial(d))}
+                      >
+                        {t("denials.quarantine")}
+                      </button>
+                    </>
                   )}
+                  <button type="button" className="btn btn-ghost" disabled={busyId === d.id} onClick={() => remove(d)}>
+                    {t("denials.delete")}
+                  </button>
                 </td>
               </tr>
             ))}
             {events.length === 0 && !loading && (
               <tr>
                 <td colSpan={7} style={{ color: "var(--color-neutral-500)" }}>
-                  {t("denials.empty")}
+                  {quarantine ? t("denials.quarantineEmpty") : t("denials.empty")}
                 </td>
               </tr>
             )}

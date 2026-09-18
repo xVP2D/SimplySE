@@ -36,6 +36,8 @@ export interface Command {
 }
 
 export interface AvcEventHit {
+  id: string;
+  index: string;
   agent_id: string;
   ts_unix: number;
   scontext: string;
@@ -221,14 +223,21 @@ export const api = {
     request<{ status: string }>("/integrations/librenms", { method: "PUT", body: JSON.stringify(payload) }),
   testLibreNMS: (payload: LibreNmsSaveRequest) =>
     request<ConnectionTestResult>("/integrations/librenms/test", { method: "POST", body: JSON.stringify(payload) }),
-  listDenials: (params: { agentId?: string; query?: string; offset?: number; limit?: number } = {}) => {
+  listDenials: (params: { agentId?: string; query?: string; quarantined?: boolean; offset?: number; limit?: number } = {}) => {
     const qs = new URLSearchParams();
+    if (params.quarantined) qs.set("quarantined", "true");
     if (params.agentId) qs.set("agent_id", params.agentId);
     if (params.query) qs.set("q", params.query);
     if (params.offset) qs.set("offset", String(params.offset));
     if (params.limit) qs.set("limit", String(params.limit));
     return request<DenialSearchResult>(`/denials?${qs.toString()}`);
   },
+  quarantineDenial: (d: { index: string; id: string }) =>
+    request<{ status: string }>("/denials/quarantine", { method: "POST", body: JSON.stringify({ index: d.index, id: d.id }) }),
+  restoreDenial: (d: { index: string; id: string }) =>
+    request<{ status: string }>("/denials/restore", { method: "POST", body: JSON.stringify({ index: d.index, id: d.id }) }),
+  deleteDenial: (d: { index: string; id: string }) =>
+    request<{ status: string }>(`/denials/${encodeURIComponent(d.index)}/${encodeURIComponent(d.id)}`, { method: "DELETE" }),
   topSignatures: (limit = 10) => request<TopSignature[]>(`/denials/top?limit=${limit}`),
   denialMatrix: (params: { days?: number; limit?: number } = {}) => {
     const qs = new URLSearchParams();

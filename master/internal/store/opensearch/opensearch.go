@@ -7,9 +7,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -104,7 +106,11 @@ func (s *Store) IndexAvcEvent(ctx context.Context, e AvcEvent) error {
 	return nil
 }
 
+// AvcEventHit carries the document's own index and id alongside the event —
+// quarantining/deleting one denial needs both (each day has its own index).
 type AvcEventHit struct {
+	ID    string `json:"id"`
+	Index string `json:"index"`
 	AvcEvent
 	Timestamp time.Time `json:"timestamp"`
 }
@@ -117,7 +123,16 @@ type SearchOptions struct {
 	Query   string
 	From    int
 	Size    int
+	// Quarantined selects the Quarantine page's events instead of the
+	// normal ones: quarantined denials are hidden from every default
+	// search/aggregation (see quarantinedField) until restored.
+	Quarantined bool
 }
+
+// quarantinedField is set to true on an event document to move it to the
+// Quarantine page. Documents never written with it simply lack the field, so
+// no mapping or migration is needed for existing data.
+const quarantinedField = "quarantined"
 
 type SearchResult struct {
 	Events []AvcEventHit `json:"events"`
@@ -145,10 +160,15 @@ func (s *Store) Search(ctx context.Context, opts SearchOptions) (SearchResult, e
 		})
 	}
 
-	boolQuery := map[string]any{"match_all": map[string]any{}}
-	if len(filters) > 0 {
-		boolQuery = map[string]any{"bool": map[string]any{"filter": filters}}
+	quarantinedTerm := map[string]any{"term": map[string]any{quarantinedField: true}}
+	boolClause := map[string]any{}
+	if opts.Quarantined {
+		filters = append(filters, quarantinedTerm)
+	} else {
+		boolClause["must_not"] = []map[string]any{quarantinedTerm}
 	}
+	boolClause["filter"] = filters
+	boolQuery := map[string]any{"bool": boolClause}
 
 	query := map[string]any{
 		"query": boolQuery,
@@ -188,6 +208,8 @@ func (s *Store) Search(ctx context.Context, opts SearchOptions) (SearchResult, e
 				Value int `json:"value"`
 			} `json:"total"`
 			Hits []struct {
+				ID     string   `json:"_id"`
+				Index  string   `json:"_index"`
 				Source AvcEvent `json:"_source"`
 			} `json:"hits"`
 		} `json:"hits"`
@@ -199,6 +221,8 @@ func (s *Store) Search(ctx context.Context, opts SearchOptions) (SearchResult, e
 	events := make([]AvcEventHit, 0, len(parsed.Hits.Hits))
 	for _, h := range parsed.Hits.Hits {
 		events = append(events, AvcEventHit{
+			ID:        h.ID,
+			Index:     h.Index,
 			AvcEvent:  h.Source,
 			Timestamp: time.Unix(h.Source.TsUnix, 0).UTC(),
 		})
@@ -206,11 +230,81 @@ func (s *Store) Search(ctx context.Context, opts SearchOptions) (SearchResult, e
 	return SearchResult{Events: events, Total: parsed.Hits.Total.Value}, nil
 }
 
+var (
+	// ErrEventNotFound: no event document has the given index/id.
+	ErrEventNotFound = errors.New("denial not found")
+	// ErrInvalidEventRef: index/id don't look like an AVC event document —
+	// rejected up front so a caller can't point quarantine/delete at some
+	// other index in the cluster (e.g. ISM's config index) or inject a path.
+	ErrInvalidEventRef = errors.New("invalid denial reference")
+
+	avcIndexRe = regexp.MustCompile(`^avc_events(-\d{4}\.\d{2}\.\d{2})?$`)
+	eventIDRe  = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+)
+
+func validateEventRef(index, id string) error {
+	if !avcIndexRe.MatchString(index) || !eventIDRe.MatchString(id) {
+		return ErrInvalidEventRef
+	}
+	return nil
+}
+
+// SetQuarantined moves one denial to (true) or back from (false) the
+// Quarantine page. Refreshes immediately so the page it was just acted on
+// reflects the change on the very next fetch.
+func (s *Store) SetQuarantined(ctx context.Context, index, id string, quarantined bool) error {
+	if err := validateEventRef(index, id); err != nil {
+		return err
+	}
+	body, err := json.Marshal(map[string]any{"doc": map[string]any{quarantinedField: quarantined}})
+	if err != nil {
+		return fmt.Errorf("marshal quarantine update: %w", err)
+	}
+	req := opensearchapi.UpdateRequest{Index: index, DocumentID: id, Body: bytes.NewReader(body), Refresh: "true"}
+	res, err := req.Do(ctx, s.client)
+	if err != nil {
+		return fmt.Errorf("quarantine denial: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode == http.StatusNotFound {
+		return ErrEventNotFound
+	}
+	if res.IsError() {
+		return fmt.Errorf("quarantine denial: opensearch returned %s", res.Status())
+	}
+	return nil
+}
+
+// DeleteEvent permanently removes one denial document.
+func (s *Store) DeleteEvent(ctx context.Context, index, id string) error {
+	if err := validateEventRef(index, id); err != nil {
+		return err
+	}
+	req := opensearchapi.DeleteRequest{Index: index, DocumentID: id, Refresh: "true"}
+	res, err := req.Do(ctx, s.client)
+	if err != nil {
+		return fmt.Errorf("delete denial: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode == http.StatusNotFound {
+		return ErrEventNotFound
+	}
+	if res.IsError() {
+		return fmt.Errorf("delete denial: opensearch returned %s", res.Status())
+	}
+	return nil
+}
+
 // runAggregation POSTs body to _search and decodes the raw aggregations
 // object into out — shared by Matrix and Trend below, which each define
 // their own concrete shape for it. Treats a missing index (no AVC events
 // indexed yet) as "no results" rather than an error, same as Search.
 func (s *Store) runAggregation(ctx context.Context, body map[string]any, out any) error {
+	// Quarantined denials are hidden from analytics too, not just the list.
+	body["query"] = map[string]any{"bool": map[string]any{
+		"must":     []any{body["query"]},
+		"must_not": []map[string]any{{"term": map[string]any{quarantinedField: true}}},
+	}}
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("marshal aggregation query: %w", err)

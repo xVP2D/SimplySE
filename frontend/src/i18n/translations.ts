@@ -28,6 +28,7 @@ const en: Dict = {
     suggestions: "Suggestions",
     wiki: "Wiki",
     settings: "Settings",
+    quarantine: "Quarantine",
   },
   brand: {
     subtitle: "Fleet control",
@@ -137,6 +138,13 @@ const en: Dict = {
     contextType: "Context type",
   },
   denials: {
+    quarantine: "Quarantine",
+    restore: "Restore",
+    delete: "Delete",
+    confirmDelete: "Permanently delete this denial?",
+    quarantineExplainer:
+      "Denials you set aside. They no longer show in the Denials list, the matrix or the trend chart; restore one to bring it back, or delete it for good.",
+    quarantineEmpty: "No quarantined denials.",
     searchPlaceholder: "Search (command, path, context…)",
     empty: "No denials match these filters.",
     fixButton: "Fix on this machine",
@@ -244,6 +252,7 @@ const fr: Dict = {
     suggestions: "Suggestions",
     wiki: "Wiki",
     settings: "Paramètres",
+    quarantine: "Quarantaine",
   },
   brand: {
     subtitle: "Fleet control",
@@ -353,6 +362,13 @@ const fr: Dict = {
     contextType: "Type de contexte",
   },
   denials: {
+    quarantine: "Quarantaine",
+    restore: "Restaurer",
+    delete: "Supprimer",
+    confirmDelete: "Supprimer définitivement ce denial ?",
+    quarantineExplainer:
+      "Denials mis de côté. Ils n'apparaissent plus dans la liste des denials, la matrice ni la tendance ; restaurez-en un pour le remettre, ou supprimez-le définitivement.",
+    quarantineEmpty: "Aucun denial en quarantaine.",
     searchPlaceholder: "Rechercher (commande, chemin, contexte…)",
     empty: "Aucun denial ne correspond à ces filtres.",
     fixButton: "Corriger sur cette machine",
@@ -460,6 +476,7 @@ const es: Dict = {
     suggestions: "Sugerencias",
     wiki: "Wiki",
     settings: "Ajustes",
+    quarantine: "Cuarentena",
   },
   brand: {
     subtitle: "Fleet control",
@@ -569,6 +586,13 @@ const es: Dict = {
     contextType: "Tipo de contexto",
   },
   denials: {
+    quarantine: "Cuarentena",
+    restore: "Restaurar",
+    delete: "Eliminar",
+    confirmDelete: "¿Eliminar definitivamente esta denegación?",
+    quarantineExplainer:
+      "Denegaciones apartadas. Ya no aparecen en la lista de denegaciones, la matriz ni la tendencia; restaure una para recuperarla, o elimínela definitivamente.",
+    quarantineEmpty: "No hay denegaciones en cuarentena.",
     searchPlaceholder: "Buscar (comando, ruta, contexto…)",
     empty: "Ninguna denegación coincide con estos filtros.",
     fixButton: "Corregir en esta máquina",

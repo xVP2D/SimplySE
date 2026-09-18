@@ -55,8 +55,9 @@ type API struct {
 	FrontendDist string
 
 	// Correlate holds whichever external SIEM/EDR/monitoring connectors
-	// were configured (see cmd/master's SIEM_OPENSEARCH_*/LIBRENMS_*
-	// env vars) — may be an empty, non-nil registry when none are.
+	// are enabled on the dashboard's Settings page (see
+	// RebuildCorrelateRegistry) — may be an empty, non-nil registry when
+	// none are.
 	Correlate *correlate.Registry
 }
 
@@ -77,6 +78,9 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/denials/matrix", a.denialMatrix)
 	mux.HandleFunc("GET /api/denials/trend", a.denialTrend)
 	mux.HandleFunc("POST /api/denials/suggest", a.suggestModuleForDenial)
+	mux.HandleFunc("POST /api/denials/quarantine", a.quarantineDenial)
+	mux.HandleFunc("POST /api/denials/restore", a.restoreDenial)
+	mux.HandleFunc("DELETE /api/denials/{index}/{id}", a.deleteDenial)
 	mux.HandleFunc("GET /api/suggested-modules", a.listSuggestedModules)
 	mux.HandleFunc("GET /api/suggested-modules/{id}", a.getSuggestedModule)
 	mux.HandleFunc("POST /api/suggested-modules/{id}/approve", a.approveSuggestedModule)
@@ -114,7 +118,7 @@ func spaHandler(dist string) http.HandlerFunc {
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -289,12 +293,55 @@ func (a *API) listDenials(w http.ResponseWriter, r *http.Request) {
 		Query:   r.URL.Query().Get("q"),
 		From:    parseNonNegativeInt(r, "offset", 0),
 		Size:    parseLimit(r, 50),
+		// ?quarantined=true lists the Quarantine page's denials instead.
+		Quarantined: r.URL.Query().Get("quarantined") == "true",
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+type denialRef struct {
+	Index string `json:"index"`
+	ID    string `json:"id"`
+}
+
+// denialStateChange maps the store's typed errors to HTTP statuses: a
+// malformed reference is the caller's mistake (400), a missing document 404.
+func denialStateChange(w http.ResponseWriter, err error, status string) {
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]string{"status": status})
+	case errors.Is(err, opensearch.ErrInvalidEventRef):
+		writeError(w, http.StatusBadRequest, err)
+	case errors.Is(err, opensearch.ErrEventNotFound):
+		writeError(w, http.StatusNotFound, err)
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
+}
+
+func (a *API) setDenialQuarantined(w http.ResponseWriter, r *http.Request, quarantined bool, status string) {
+	var ref denialRef
+	if err := json.NewDecoder(r.Body).Decode(&ref); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	denialStateChange(w, a.Search.SetQuarantined(r.Context(), ref.Index, ref.ID, quarantined), status)
+}
+
+func (a *API) quarantineDenial(w http.ResponseWriter, r *http.Request) {
+	a.setDenialQuarantined(w, r, true, "quarantined")
+}
+
+func (a *API) restoreDenial(w http.ResponseWriter, r *http.Request) {
+	a.setDenialQuarantined(w, r, false, "restored")
+}
+
+func (a *API) deleteDenial(w http.ResponseWriter, r *http.Request) {
+	denialStateChange(w, a.Search.DeleteEvent(r.Context(), r.PathValue("index"), r.PathValue("id")), "deleted")
 }
 
 func (a *API) topSignatures(w http.ResponseWriter, r *http.Request) {
