@@ -296,9 +296,7 @@ func (s *Store) CreateAlert(ctx context.Context, a Alert) error {
 }
 
 // ListAlertsOptions filters and paginates the alert center. Status is an
-// exact match ("open", "acknowledged" or "quarantined"); left empty, every
-// alert matches EXCEPT quarantined ones — those only show on the
-// Quarantine page, which asks for them explicitly.
+// exact match ("open" or "acknowledged"); left empty, all alerts match.
 type ListAlertsOptions struct {
 	Status   string
 	Severity string
@@ -316,7 +314,7 @@ func (s *Store) ListAlerts(ctx context.Context, opts ListAlertsOptions) (ListAle
 		SELECT id, type, title, message, agent_id, scontext, tcontext, tclass, severity, status,
 			created_at, acknowledged_at, acknowledged_by, count(*) OVER() AS total
 		FROM alerts
-		WHERE (($1 = '' AND status <> 'quarantined') OR status = $1) AND ($2 = '' OR severity = $2)
+		WHERE ($1 = '' OR status = $1) AND ($2 = '' OR severity = $2)
 		ORDER BY created_at DESC
 		LIMIT $3 OFFSET $4
 	`, opts.Status, opts.Severity, opts.Limit, opts.Offset)
@@ -346,45 +344,6 @@ func (s *Store) AcknowledgeAlert(ctx context.Context, id, by string) error {
 		return fmt.Errorf("acknowledge alert: %w", err)
 	}
 	return nil
-}
-
-// ErrAlertNotFound is returned by the alert state changes below when no
-// alert has the given id, so the API can answer 404 instead of a silent 200.
-var ErrAlertNotFound = errors.New("alert not found")
-
-func alertRowsAffected(res sql.Result, err error, what string) error {
-	if err != nil {
-		return fmt.Errorf("%s alert: %w", what, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("%s alert: %w", what, err)
-	}
-	if n == 0 {
-		return ErrAlertNotFound
-	}
-	return nil
-}
-
-// QuarantineAlert moves an alert out of the main alert list into the
-// Quarantine page (status "quarantined"); RestoreAlert puts it back as open.
-func (s *Store) QuarantineAlert(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE alerts SET status = 'quarantined' WHERE id = $1`, id)
-	return alertRowsAffected(res, err, "quarantine")
-}
-
-func (s *Store) RestoreAlert(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `
-		UPDATE alerts SET status = 'open', acknowledged_at = NULL, acknowledged_by = ''
-		WHERE id = $1 AND status = 'quarantined'
-	`, id)
-	return alertRowsAffected(res, err, "restore")
-}
-
-// DeleteAlert permanently removes an alert, whatever its status.
-func (s *Store) DeleteAlert(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM alerts WHERE id = $1`, id)
-	return alertRowsAffected(res, err, "delete")
 }
 
 // IdempotencyRecord describes an existing idempotency key when the caller
