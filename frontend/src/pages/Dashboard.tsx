@@ -1,65 +1,154 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { api, type Agent, type Alert, type Command, type TopSignature } from "../lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { GridLayout, useContainerWidth, type Layout } from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
+import { api, type Agent, type Alert, type Command, type TopSignature, type TrendPoint } from "../lib/api";
 import { evaluateFleet, fleetScore } from "../lib/compliance";
 import { useTranslation } from "../i18n";
+import { randomUUID } from "../lib/uuid";
+import {
+  DEFAULT_WIDGETS,
+  WIDGET_CATALOG,
+  WIDGET_DEFS,
+  renderWidgetContent,
+  type DashboardData,
+  type WidgetInstance,
+  type WidgetType,
+} from "../lib/dashboardWidgets";
 
-function StatCard({ label, value, meta }: { label: string; value: string | number; meta: string }) {
+const GRID_COLS = 12;
+const ROW_HEIGHT = 32;
+const MARGIN: readonly [number, number] = [11, 11];
+const SAVE_DEBOUNCE_MS = 800;
+
+function WidgetFrame({
+  editMode,
+  title,
+  headerAction,
+  limit,
+  onLimitChange,
+  onRemove,
+  scrollable,
+  children,
+}: {
+  editMode: boolean;
+  title?: string;
+  headerAction?: React.ReactNode;
+  limit?: number;
+  onLimitChange?: (n: number) => void;
+  onRemove: () => void;
+  scrollable?: boolean;
+  children: React.ReactNode;
+}) {
+  const { t } = useTranslation();
   return (
     <div
       style={{
+        height: "100%",
         display: "flex",
         flexDirection: "column",
-        gap: 5.6,
+        gap: 8.4,
         padding: 14,
         borderRadius: 8,
         background: "var(--color-surface)",
-        boxShadow: "var(--shadow-sm)",
+        boxShadow: editMode ? "var(--shadow-md)" : "var(--shadow-sm)",
+        overflow: "hidden",
       }}
     >
-      <span
-        style={{
-          fontSize: 10,
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          color: "var(--color-accent)",
-        }}
-      >
-        {label}
-      </span>
-      <span style={{ fontFamily: "var(--font-heading)", fontSize: 30, lineHeight: 1 }}>{value}</span>
-      <span style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>{meta}</span>
+      {(title || headerAction || editMode) && (
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8.4 }}>
+          {title ? <h5 style={{ margin: 0, fontSize: 15 }}>{title}</h5> : <span />}
+          <div style={{ display: "flex", alignItems: "center", gap: 8.4 }}>
+            {!editMode && headerAction}
+            {editMode && onLimitChange && (
+              <input
+                type="number"
+                min={1}
+                max={50}
+                className="input no-drag"
+                value={limit}
+                onChange={(e) => onLimitChange(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+                style={{ width: 56, minHeight: 26, padding: "2px 6px", fontSize: 12 }}
+                title={t("dashboard.widgetLimitLabel")}
+              />
+            )}
+            {editMode && (
+              <button
+                type="button"
+                className="btn btn-icon btn-secondary no-drag"
+                style={{ width: 26, height: 26 }}
+                onClick={onRemove}
+                title={t("dashboard.removeWidget")}
+              >
+                <i className="ph ph-x" style={{ fontSize: 13 }} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      <div style={{ flex: 1, minHeight: 0, overflow: scrollable ? "auto" : "hidden" }}>{children}</div>
     </div>
   );
 }
 
 export function Dashboard() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [topSignatures, setTopSignatures] = useState<TopSignature[]>([]);
   const [recentCommands, setRecentCommands] = useState<Command[]>([]);
-  const [openAlerts, setOpenAlerts] = useState<Alert[]>([]);
   const [allOpenAlerts, setAllOpenAlerts] = useState<Alert[]>([]);
   const [openAlertsTotal, setOpenAlertsTotal] = useState(0);
+  const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const [widgets, setWidgets] = useState<WidgetInstance[]>(DEFAULT_WIDGETS);
+  const [editMode, setEditMode] = useState(false);
+  const [layoutLoaded, setLayoutLoaded] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [showCatalog, setShowCatalog] = useState(false);
+
+  const { width, containerRef, mounted } = useContainerWidth();
+
+  // Load the saved layout once; an empty result means nothing has been
+  // customized yet, so the fixed default layout (mirrors the dashboard as
+  // it looked before it became a widget grid) stays in place.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getDashboardLayout()
+      .then((res) => {
+        if (cancelled) return;
+        if (res.widgets && res.widgets.length > 0) {
+          setWidgets(res.widgets.map((w) => ({ ...w, type: w.type as WidgetType })));
+        }
+      })
+      .catch(() => {
+        // Master unreachable at load time — the poller below will surface
+        // the error banner; keep the default layout for now.
+      })
+      .finally(() => setLayoutLoaded(true));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const [a, s, c, al] = await Promise.all([
+        const [a, s, c, al, tr] = await Promise.all([
           api.listAgents(),
-          api.topSignatures(6),
-          api.recentCommands({ limit: 6 }),
+          api.topSignatures(50),
+          api.recentCommands({ limit: 50 }),
           api.listAlerts({ status: "open", limit: 500 }),
+          api.denialTrend({ days: 14 }),
         ]);
         if (cancelled) return;
         setAgents(a ?? []);
         setTopSignatures(s ?? []);
         setRecentCommands(c.commands ?? []);
-        setOpenAlerts((al.alerts ?? []).slice(0, 6));
         setAllOpenAlerts(al.alerts ?? []);
         setOpenAlertsTotal(al.total);
+        setTrend(tr ?? []);
         setError(null);
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
@@ -73,12 +162,83 @@ export function Dashboard() {
     };
   }, []);
 
-  const online = agents.filter((a) => a.connected).length;
-  const enforcing = agents.filter((a) => a.mode === "enforcing").length;
-  const permissive = agents.filter((a) => a.mode === "permissive").length;
-  const disabled = agents.filter((a) => a.mode === "disabled" || a.mode === "unknown").length;
-  const totalDenials = topSignatures.reduce((sum, s) => sum + s.count, 0);
   const complianceScore = fleetScore(evaluateFleet(agents, allOpenAlerts));
+  const data: DashboardData = {
+    agents,
+    topSignatures,
+    recentCommands,
+    openAlerts: allOpenAlerts,
+    openAlertsTotal,
+    complianceScore,
+    trend,
+  };
+
+  // Debounced autosave: any add/remove/move/resize/setting change lands
+  // here shortly after, so dragging or resizing doesn't fire a PUT per
+  // pixel. Skipped until the initial GET has resolved so it can never
+  // overwrite a saved layout with the still-default one.
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!layoutLoaded) return;
+    setSaveState("saving");
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      api
+        .saveDashboardLayout(widgets)
+        .then(() => setSaveState("saved"))
+        .catch(() => setSaveState("idle"));
+    }, SAVE_DEBOUNCE_MS);
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [widgets, layoutLoaded]);
+
+  const layout: Layout = useMemo(
+    () =>
+      widgets.map((w) => ({
+        i: w.id,
+        x: w.x,
+        y: w.y,
+        w: w.w,
+        h: w.h,
+        minW: WIDGET_DEFS[w.type].minSize.w,
+        minH: WIDGET_DEFS[w.type].minSize.h,
+      })),
+    [widgets],
+  );
+
+  const handleLayoutChange = (next: Layout) => {
+    setWidgets((prev) =>
+      prev.map((w) => {
+        const item = next.find((n) => n.i === w.id);
+        return item ? { ...w, x: item.x, y: item.y, w: item.w, h: item.h } : w;
+      }),
+    );
+  };
+
+  const addWidget = (type: WidgetType) => {
+    const def = WIDGET_DEFS[type];
+    const maxY = widgets.reduce((m, w) => Math.max(m, w.y + w.h), 0);
+    setWidgets((prev) => [
+      ...prev,
+      {
+        id: randomUUID(),
+        type,
+        x: 0,
+        y: maxY,
+        w: def.defaultSize.w,
+        h: def.defaultSize.h,
+        limit: def.hasLimit ? def.defaultLimit : undefined,
+      },
+    ]);
+    setShowCatalog(false);
+  };
+
+  const removeWidget = (id: string) => setWidgets((prev) => prev.filter((w) => w.id !== id));
+
+  const setWidgetLimit = (id: string, limit: number) =>
+    setWidgets((prev) => prev.map((w) => (w.id === id ? { ...w, limit } : w)));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16.8 }}>
@@ -88,172 +248,94 @@ export function Dashboard() {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(178px,1fr))", gap: 11.2 }}>
-        <StatCard
-          label={t("dashboard.statEnrolledAgents")}
-          value={agents.length}
-          meta={t("dashboard.statEnrolledAgentsMeta", { online, offline: agents.length - online })}
-        />
-        <StatCard
-          label={t("dashboard.statEnforcing")}
-          value={enforcing}
-          meta={t("dashboard.statEnforcingMeta", { permissive, disabled })}
-        />
-        <StatCard
-          label={t("dashboard.statDenials")}
-          value={totalDenials}
-          meta={t("dashboard.statDenialsMeta", { count: topSignatures.length })}
-        />
-        <StatCard label={t("dashboard.statRecentCommands")} value={recentCommands.length} meta={t("dashboard.statRecentCommandsMeta")} />
-        <StatCard label={t("dashboard.statOpenAlerts")} value={openAlertsTotal} meta={t("dashboard.statOpenAlertsMeta")} />
-        <StatCard label={t("dashboard.statCompliance")} value={`${complianceScore} %`} meta={t("dashboard.statComplianceMeta")} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8.4 }}>
+        {editMode && (
+          <>
+            <span style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>
+              {saveState === "saving" ? t("dashboard.savingLayout") : saveState === "saved" ? t("dashboard.layoutSaved") : ""}
+            </span>
+            <div style={{ position: "relative" }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setShowCatalog((v) => !v)}>
+                <i className="ph ph-plus" /> {t("dashboard.addWidget")}
+              </button>
+              {showCatalog && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 4px)",
+                    right: 0,
+                    zIndex: 10,
+                    display: "flex",
+                    flexDirection: "column",
+                    minWidth: 220,
+                    padding: 6,
+                    borderRadius: 8,
+                    background: "var(--color-surface)",
+                    boxShadow: "var(--shadow-lg)",
+                  }}
+                >
+                  {WIDGET_CATALOG.map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ justifyContent: "flex-start" }}
+                      onClick={() => addWidget(type)}
+                    >
+                      {t(WIDGET_DEFS[type].labelKey)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+        <button
+          type="button"
+          className={editMode ? "btn btn-primary" : "btn btn-secondary"}
+          onClick={() => {
+            setEditMode((v) => !v);
+            setShowCatalog(false);
+          }}
+        >
+          <i className={`ph ${editMode ? "ph-check" : "ph-sliders-horizontal"}`} />
+          {editMode ? t("dashboard.doneCustomizing") : t("dashboard.customize")}
+        </button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: 11.2, alignItems: "start" }}>
-        <section
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 8.4,
-            padding: 14,
-            borderRadius: 8,
-            background: "var(--color-surface)",
-            boxShadow: "var(--shadow-sm)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 11.2 }}>
-            <h5 style={{ margin: 0, fontSize: 15 }}>{t("dashboard.topSignatures")}</h5>
-            <Link to="/denials" className="btn btn-ghost">
-              {t("common.viewAll")}
-            </Link>
-          </div>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{t("common.columns.sourceTarget")}</th>
-                <th>{t("common.columns.classPerm")}</th>
-                <th style={{ textAlign: "right" }}>{t("dashboard.colOccurrences")}</th>
-                <th style={{ textAlign: "right" }}>{t("dashboard.colAgents")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topSignatures.map((s) => (
-                <tr key={s.pair + s.class}>
-                  <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5 }}>{s.pair}</td>
-                  <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5, color: "var(--color-neutral-400)" }}>
-                    {s.class} · {s.perms}
-                  </td>
-                  <td style={{ textAlign: "right" }}>{s.count}</td>
-                  <td style={{ textAlign: "right", color: "var(--color-neutral-500)" }}>{s.agents}</td>
-                </tr>
-              ))}
-              {topSignatures.length === 0 && (
-                <tr>
-                  <td colSpan={4} style={{ color: "var(--color-neutral-500)" }}>
-                    {t("dashboard.noDenialsYet")}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </section>
-
-        <section
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 8.4,
-            padding: 14,
-            borderRadius: 8,
-            background: "var(--color-surface)",
-            boxShadow: "var(--shadow-sm)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 11.2 }}>
-            <h5 style={{ margin: 0, fontSize: 15 }}>{t("dashboard.recentDeployments")}</h5>
-            <Link to="/deployments" className="btn btn-ghost">
-              {t("dashboard.history")}
-            </Link>
-          </div>
-          {recentCommands.map((c) => (
-            <div
-              key={c.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 11.2,
-                padding: "8.4px 0",
-                borderBottom: "1px solid color-mix(in srgb, var(--color-text) 8%, transparent)",
-              }}
-            >
-              <span style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
-                <span style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5 }}>{c.type}</span>
-                <span style={{ fontSize: 11, color: "var(--color-neutral-500)" }}>agent {c.agent_id}</span>
-              </span>
-              <span className={statusTagClass(c.status)}>{c.status}</span>
-            </div>
-          ))}
-          {recentCommands.length === 0 && (
-            <p style={{ color: "var(--color-neutral-500)", fontSize: 13 }}>{t("dashboard.noDeploymentsYet")}</p>
-          )}
-        </section>
-
-        <section
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 8.4,
-            padding: 14,
-            borderRadius: 8,
-            background: "var(--color-surface)",
-            boxShadow: "var(--shadow-sm)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 11.2 }}>
-            <h5 style={{ margin: 0, fontSize: 15 }}>{t("dashboard.openAlerts")}</h5>
-            <Link to="/alerts" className="btn btn-ghost">
-              {t("dashboard.alertCenter")}
-            </Link>
-          </div>
-          {openAlerts.map((a) => (
-            <div
-              key={a.id}
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 11.2,
-                padding: "8.4px 0",
-                borderBottom: "1px solid color-mix(in srgb, var(--color-text) 8%, transparent)",
-              }}
-            >
-              <i
-                className={`ph ${a.type === "threshold" ? "ph-chart-line-up" : "ph-sparkle"}`}
-                style={{ fontSize: 15, color: "var(--color-accent)", marginTop: 2 }}
-              />
-              <span style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
-                <span style={{ fontSize: 13 }}>{a.title}</span>
-                <span style={{ fontSize: 11, color: "var(--color-neutral-500)" }}>{a.agent_id}</span>
-              </span>
-            </div>
-          ))}
-          {openAlerts.length === 0 && (
-            <p style={{ color: "var(--color-neutral-500)", fontSize: 13 }}>{t("dashboard.noOpenAlerts")}</p>
-          )}
-        </section>
+      <div ref={containerRef as React.RefObject<HTMLDivElement>}>
+        {mounted && (
+          <GridLayout
+            width={width}
+            layout={layout}
+            gridConfig={{ cols: GRID_COLS, rowHeight: ROW_HEIGHT, margin: MARGIN }}
+            dragConfig={{ enabled: editMode, cancel: "button, input, select, a, .no-drag" }}
+            resizeConfig={{ enabled: editMode }}
+            onLayoutChange={handleLayoutChange}
+            autoSize
+          >
+            {widgets.map((w) => {
+              const { title, body, headerAction, scrollable } = renderWidgetContent(w, data, t, locale);
+              const def = WIDGET_DEFS[w.type];
+              return (
+                <div key={w.id}>
+                  <WidgetFrame
+                    editMode={editMode}
+                    title={title}
+                    headerAction={headerAction}
+                    limit={def.hasLimit ? w.limit ?? def.defaultLimit : undefined}
+                    onLimitChange={def.hasLimit ? (n) => setWidgetLimit(w.id, n) : undefined}
+                    onRemove={() => removeWidget(w.id)}
+                    scrollable={scrollable}
+                  >
+                    {body}
+                  </WidgetFrame>
+                </div>
+              );
+            })}
+          </GridLayout>
+        )}
       </div>
     </div>
   );
-}
-
-function statusTagClass(status: string): string {
-  switch (status) {
-    case "acked":
-      return "tag tag-accent";
-    case "failed":
-      return "tag tag-outline";
-    case "sent":
-      return "tag tag-accent-2";
-    default:
-      return "tag tag-neutral";
-  }
 }

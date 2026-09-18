@@ -198,6 +198,20 @@ export interface ConnectionTestResult {
   error?: string;
 }
 
+export interface DashboardWidget {
+  id: string;
+  type: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  limit?: number;
+}
+
+export interface DashboardLayout {
+  widgets: DashboardWidget[];
+}
+
 export interface Collection {
   id: string;
   agent_id: string;
@@ -234,6 +248,9 @@ export const api = {
   correlateSources: () => request<string[]>("/correlate/sources"),
   correlateAgent: (id: string, aroundUnix: number, windowSeconds = 60) =>
     request<CorrelatedEvent[]>(`/agents/${id}/correlate?around=${aroundUnix}&window=${windowSeconds}`),
+  getDashboardLayout: () => request<DashboardLayout>("/dashboard"),
+  saveDashboardLayout: (widgets: DashboardWidget[]) =>
+    request<{ status: string }>("/dashboard", { method: "PUT", body: JSON.stringify({ widgets }) }),
   getIntegrations: () => request<IntegrationSettings>("/integrations"),
   saveSiemOpenSearch: (payload: SiemOpenSearchSaveRequest) =>
     request<{ status: string }>("/integrations/siem-opensearch", { method: "PUT", body: JSON.stringify(payload) }),

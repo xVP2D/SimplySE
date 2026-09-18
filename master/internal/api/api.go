@@ -74,6 +74,8 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/agents/{id}/selinux", a.getAgentSelinux)
 	mux.HandleFunc("GET /api/agents/{id}/correlate", a.correlateAgent)
 	mux.HandleFunc("GET /api/correlate/sources", a.correlateSources)
+	mux.HandleFunc("GET /api/dashboard", a.getDashboardLayout)
+	mux.HandleFunc("PUT /api/dashboard", a.putDashboardLayout)
 	mux.HandleFunc("GET /api/integrations", a.getIntegrations)
 	mux.HandleFunc("PUT /api/integrations/siem-opensearch", a.putSIEMOpenSearch)
 	mux.HandleFunc("POST /api/integrations/siem-opensearch/test", a.testSIEMOpenSearch)

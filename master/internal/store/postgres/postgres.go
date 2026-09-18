@@ -1009,3 +1009,29 @@ func (s *Store) RecordSuggestion(ctx context.Context, id, status, message string
 		UPDATE domain_collections SET status = $2, message = $3, suggestion_id = $4
 		WHERE id = $1 AND status = 'collected'`, id, status, message, suggestionID)
 }
+
+// GetDashboardLayout returns the raw widgets_json blob for the dashboard's
+// widget grid (see internal/api/dashboard.go), or (nil, false, nil) when
+// nothing has been saved yet — the frontend falls back to its built-in
+// default layout in that case.
+func (s *Store) GetDashboardLayout(ctx context.Context) ([]byte, bool, error) {
+	var widgetsJSON []byte
+	err := s.db.QueryRowContext(ctx, `SELECT widgets_json FROM dashboard_layout WHERE id = true`).Scan(&widgetsJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("get dashboard layout: %w", err)
+	}
+	return widgetsJSON, true, nil
+}
+
+// SaveDashboardLayout replaces the whole widget grid — always the complete
+// list of widgets, never a partial patch, same convention as
+// UpsertIntegrationSetting.
+func (s *Store) SaveDashboardLayout(ctx context.Context, widgetsJSON []byte) error {
+	return s.exec(ctx, "save dashboard layout", `
+		INSERT INTO dashboard_layout (id, widgets_json, updated_at) VALUES (true, $1, now())
+		ON CONFLICT (id) DO UPDATE SET widgets_json = EXCLUDED.widgets_json, updated_at = now()
+	`, widgetsJSON)
+}

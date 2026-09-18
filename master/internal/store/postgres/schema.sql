@@ -194,3 +194,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_domain_collections_one_active
     ON domain_collections (agent_id, domain)
     WHERE status IN ('starting', 'collecting', 'stopping');
 CREATE INDEX IF NOT EXISTS idx_domain_collections_started_at ON domain_collections (started_at DESC);
+
+-- The dashboard's customizable widget grid (see internal/api/dashboard.go).
+-- One shared layout for the whole install, not per-operator — whoever
+-- edits it last wins, same trade-off as every other setting in this tool.
+-- Singleton row enforced by the boolean PK + CHECK: an INSERT of a second
+-- row would violate the PK, so upserts always target id = true.
+CREATE TABLE IF NOT EXISTS dashboard_layout (
+    id           BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+    widgets_json JSONB NOT NULL DEFAULT '[]',
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
