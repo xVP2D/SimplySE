@@ -13,7 +13,7 @@ export type { ChartCategory };
 
 // What a chart type needs from the shared input before it can draw anything
 // meaningful; without it the tile says so instead of drawing an empty frame.
-export type Need = "categories" | "time" | "matrix" | "hierarchy" | "kpi" | "samples1" | "samples3" | "pooled3" | "pooled5" | "points" | "variables";
+export type Need = "categories" | "time" | "matrix" | "heat" | "hourly" | "hierarchy" | "kpi" | "samples1" | "samples3" | "pooled3" | "pooled5" | "points" | "variables";
 
 export interface ChartDef {
   id: string;
@@ -43,6 +43,7 @@ export const CHARTS: ChartDef[] = [
   def("step", "classic", "time", { build: classic.step }),
   def("combo", "classic", "time", { build: classic.combo }),
   def("waterfall", "classic", "time", { build: classic.waterfall }),
+  def("heatmap", "classic", "heat", { build: classic.heatmap }),
   // share
   def("pie", "share", "categories", { build: share.pie }),
   def("donut", "share", "categories", { build: share.donut }),
@@ -74,6 +75,7 @@ export const CHARTS: ChartDef[] = [
   def("ecdf", "stats", "samples3", { build: stats.ecdfChart }),
   def("pareto", "stats", "categories", { build: stats.pareto }),
   def("qq", "stats", "pooled5", { build: stats.qq }),
+  def("hour-heatmap", "stats", "hourly", { build: stats.hourHeatmap }),
   // correlation
   def("corr-matrix", "corr", "variables", { render: html.corrMatrix }),
   def("corr-heatmap", "corr", "variables", { build: corr.corrHeatmap }),
@@ -102,6 +104,10 @@ export function hasData(chart: ChartDef, input: ChartInput): boolean {
       return !input.empty && input.time.ts.length >= 2;
     case "matrix":
       return input.matrix.rows.length > 0 && input.matrix.cols.length > 0;
+    case "heat":
+      return input.heat.rows.length > 0 && input.heat.cols.length > 0;
+    case "hourly":
+      return input.hourly.length >= 8;
     case "hierarchy":
       return input.hierarchy.length > 0;
     case "kpi":

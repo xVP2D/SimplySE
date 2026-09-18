@@ -1,4 +1,5 @@
 import type { ChartInput } from "../types.ts";
+import { formatDuration } from "../shape.ts";
 import { OTHER } from "../types.ts";
 import type { ChartTokens } from "../tokens.ts";
 
@@ -14,12 +15,15 @@ export interface BuildCtx {
   t: (key: string, vars?: Record<string, string | number>) => string;
   locale: string;
   compact: boolean;
+  // the tile's own title already names the data: KPI captions would repeat it
+  bare?: boolean;
 }
 
 export function fmt(ctx: BuildCtx, n: number): string {
   if (!Number.isFinite(n)) return "-";
   const m = ctx.input.meta.measure;
   if (m.unit === "percent") return new Intl.NumberFormat(ctx.locale, { maximumFractionDigits: 1 }).format(n) + " %";
+  if (m.unit === "seconds") return formatDuration(n);
   const digits = m.additive ? 0 : 1;
   return new Intl.NumberFormat(ctx.locale, { maximumFractionDigits: digits }).format(n);
 }

@@ -4,12 +4,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"console-selinux/master/internal/store/postgres"
 )
 
 // getHistory serves aggregated permanent history, e.g.
 // GET /api/history/denials?days=90&bucket=day&group=agent,tclass
+// (or from=<unix seconds> instead of days, for an exact window start)
 //
 // The grouping dimensions and datasets are a fixed whitelist (see
 // postgres.NormalizeHistoryQuery); rows carry "t" (bucket start, unix
@@ -22,7 +24,8 @@ func (a *API) getHistory(w http.ResponseWriter, r *http.Request) {
 	if g := r.URL.Query().Get("group"); g != "" {
 		group = strings.Split(g, ",")
 	}
-	q, err := postgres.NormalizeHistoryQuery(dataset, days, r.URL.Query().Get("bucket"), group)
+	from, _ := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64)
+	q, err := postgres.NormalizeHistoryQuery(dataset, days, from, time.Now(), r.URL.Query().Get("bucket"), group)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -35,6 +38,7 @@ func (a *API) getHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dataset":   q.Dataset,
 		"days":      q.Days,
+		"from":      q.From.Unix(),
 		"bucket":    q.Bucket,
 		"group":     q.Group,
 		"rows":      res.Rows,

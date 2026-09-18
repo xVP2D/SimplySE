@@ -18,10 +18,10 @@ function Message({ icon, text }: { icon: string; text: string }) {
 // Draws one chart type over an already loaded input. A chart that cannot be
 // drawn (not enough data, or a builder that throws) says so in place instead
 // of leaving an empty frame or taking the page down with it.
-export function ChartRender({ chart, input, compact = false }: { chart: ChartDef; input: ChartInput; compact?: boolean }) {
+export function ChartRender({ chart, input, compact = false, bare = false }: { chart: ChartDef; input: ChartInput; compact?: boolean; bare?: boolean }) {
   const { t, locale } = useTranslation();
   const tokens = useTokens();
-  const ctx = useMemo<BuildCtx>(() => ({ input, tokens, t, locale, compact }), [input, tokens, t, locale, compact]);
+  const ctx = useMemo<BuildCtx>(() => ({ input, tokens, t, locale, compact, bare }), [input, tokens, t, locale, compact, bare]);
   const ready = hasData(chart, input);
 
   const drawn = useMemo((): { option?: Opt; node?: ReactNode; error?: boolean } | null => {

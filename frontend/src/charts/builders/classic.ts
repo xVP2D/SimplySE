@@ -8,6 +8,7 @@ import {
   fmt,
   fullDateLabel,
   grid,
+  itemTooltip,
   label,
   legend,
   nn,
@@ -327,6 +328,67 @@ export function waterfall(ctx: BuildCtx): Opt {
       { type: "bar", name: totalName, stack: "wf", data: totals, barMaxWidth: 26, itemStyle: { color: ctx.tokens.muted } },
       { type: "bar", name: upName, stack: "wf", data: ups, barMaxWidth: 26, itemStyle: { color: tone.up } },
       { type: "bar", name: downName, stack: "wf", data: downs, barMaxWidth: 26, itemStyle: { color: tone.down } },
+    ],
+  };
+}
+
+// 14b. Heatmap: magnitude across two dimensions at once — more categories
+// than a grouped or stacked bar can hold legibly (a source x target matrix,
+// for instance). Sequential color, since this is a magnitude, not a polarity.
+export function heatmap(ctx: BuildCtx): Opt {
+  const { rows, cols, values, weights } = ctx.input.heat;
+  const additive = ctx.input.meta.measure.additive;
+  let max = 0;
+  const data: (number | string)[][] = [];
+  rows.forEach((_, i) =>
+    cols.forEach((_, j) => {
+      const has = additive || weights[i][j] > 0;
+      if (has) max = Math.max(max, values[i][j]);
+      data.push([j, i, has ? values[i][j] : "-"]);
+    }),
+  );
+  return {
+    ...base(ctx),
+    grid: { left: 8, right: ctx.compact ? 10 : 60, top: 8, bottom: rows.length > 6 ? 60 : 34, containLabel: true },
+    tooltip: itemTooltip(ctx, (p: Opt) => `${label(ctx, rows[p.value[1]])} / ${label(ctx, cols[p.value[0]])}<br/><b>${p.value[2] === "-" ? "-" : fmt(ctx, Number(p.value[2]))}</b>`),
+    xAxis: {
+      type: "category",
+      data: cols.map((c) => label(ctx, c)),
+      splitArea: { show: false },
+      axisTick: { show: false },
+      axisLine: { show: false },
+      axisLabel: { color: ctx.tokens.muted, fontSize: 11, interval: 0, rotate: rows.length > 6 ? 30 : 0, width: 78, overflow: "truncate" },
+    },
+    yAxis: {
+      type: "category",
+      data: rows.map((r) => label(ctx, r)),
+      inverse: true,
+      axisTick: { show: false },
+      axisLine: { show: false },
+      axisLabel: { color: ctx.tokens.muted, fontSize: 11, width: 100, overflow: "truncate" },
+    },
+    visualMap: {
+      min: 0,
+      max: max || 1,
+      calculable: false,
+      orient: "vertical",
+      right: 0,
+      top: "middle",
+      itemWidth: 12,
+      itemHeight: 110,
+      show: !ctx.compact,
+      text: [fmt(ctx, max), "0"],
+      textStyle: { color: ctx.tokens.muted, fontSize: 11 },
+      inRange: { color: ctx.tokens.seq },
+    },
+    series: [
+      {
+        type: "heatmap",
+        data,
+        itemStyle: { borderColor: ctx.tokens.surface, borderWidth: 2, borderRadius: 3 },
+        label: { show: !ctx.compact && rows.length * cols.length <= 40, fontSize: 11, color: ctx.tokens.text, formatter: (p: Opt) => (p.value[2] === "-" ? "-" : fmt(ctx, Number(p.value[2]))) },
+        emphasis: { itemStyle: { borderColor: ctx.tokens.text, borderWidth: 1 } },
+      },
     ],
   };
 }

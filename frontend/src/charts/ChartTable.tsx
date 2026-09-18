@@ -112,7 +112,7 @@ export function ChartTable({ chart, input }: { chart: ChartDef; input: ChartInpu
       const rows: [string, string][] = [
         [t("charts.current"), fmt(ctx, k.value)],
         [t("charts.previous"), k.previous === null ? "-" : fmt(ctx, k.previous)],
-        [t("charts.target"), fmt(ctx, k.target)],
+        [t(k.targetSource === "config" ? "charts.target" : "charts.previousPeriod"), k.targetSource === "none" ? "-" : fmt(ctx, k.target)],
         [t("charts.stats.min"), fmt(ctx, k.min)],
         [t("charts.stats.mean"), fmt(ctx, k.mean)],
         [t("charts.stats.max"), fmt(ctx, k.max)],
@@ -172,6 +172,56 @@ export function ChartTable({ chart, input }: { chart: ChartDef; input: ChartInpu
                 <td style={num}>{plain(ctx, p.x)}</td>
                 <td style={num}>{plain(ctx, p.y)}</td>
                 <td style={num}>{plain(ctx, p.size)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </>
+      );
+      break;
+    }
+    case "heat":
+      body = (
+        <>
+          {head([dimName, ...input.heat.cols.map((c) => label(ctx, c))])}
+          <tbody>
+            {input.heat.rows.map((r, i) => (
+              <tr key={r}>
+                <td>{label(ctx, r)}</td>
+                {input.heat.cols.map((c, j) => (
+                  <td key={c} style={num}>
+                    {input.heat.weights[i][j] > 0 || input.meta.measure.additive ? fmt(ctx, input.heat.values[i][j]) : "-"}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </>
+      );
+      break;
+    case "hourly": {
+      const days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((k) => t("charts.weekday." + k));
+      const sum = Array.from({ length: 7 }, () => Array(24).fill(0));
+      const weight = Array.from({ length: 7 }, () => Array(24).fill(0));
+      const additive = input.meta.measure.additive;
+      for (const h of input.hourly) {
+        const d = new Date(h.t * 1000);
+        const wd = (d.getUTCDay() + 6) % 7;
+        const hour = d.getUTCHours();
+        sum[wd][hour] += additive ? h.value : h.value * h.weight;
+        weight[wd][hour] += h.weight;
+      }
+      body = (
+        <>
+          {head([t("charts.weekday.label"), ...Array.from({ length: 24 }, (_, h) => `${h}h`)])}
+          <tbody>
+            {days.map((d, i) => (
+              <tr key={d}>
+                <td>{d}</td>
+                {Array.from({ length: 24 }, (_, h) => (
+                  <td key={h} style={num}>
+                    {weight[i][h] > 0 ? fmt(ctx, additive ? sum[i][h] : sum[i][h] / weight[i][h]) : "-"}
+                  </td>
+                ))}
               </tr>
             ))}
           </tbody>

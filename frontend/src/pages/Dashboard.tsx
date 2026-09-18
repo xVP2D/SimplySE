@@ -1,11 +1,14 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { GridLayout, useContainerWidth, type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
-import { api, type Agent, type Alert, type Command, type TopSignature, type TrendPoint } from "../lib/api";
+import { api, type Agent, type Alert, type Collection, type Command, type SuggestedModule, type TopSignature, type TrendPoint } from "../lib/api";
 import { evaluateFleet, fleetScore } from "../lib/compliance";
 import { useTranslation } from "../i18n";
 import { randomUUID } from "../lib/uuid";
 import { HeaderActions } from "../components/PageActions";
+import { TemplatePicker } from "../components/TemplatePicker";
+import { GRID_COLS, MARGIN, ROW_HEIGHT, fitLimit } from "../lib/dashboardGrid.ts";
+import { placeTemplate, rowsForViewport, type DashboardTemplate } from "../lib/dashboardTemplates.ts";
 const ChartConfigDialog = lazy(() => import("../charts/ChartConfigDialog").then((m) => ({ default: m.ChartConfigDialog })));
 import { DEFAULT_CHART, randomChartConfig } from "../charts/datasets";
 import { ALL_CHART_IDS, isTileSized } from "../charts/ids";
@@ -19,9 +22,6 @@ import {
   type WidgetType,
 } from "../lib/dashboardWidgets";
 
-const GRID_COLS = 12;
-const ROW_HEIGHT = 32;
-const MARGIN: readonly [number, number] = [11, 11];
 const SAVE_DEBOUNCE_MS = 800;
 
 function WidgetFrame({
@@ -125,6 +125,8 @@ export function Dashboard() {
   const [allOpenAlerts, setAllOpenAlerts] = useState<Alert[]>([]);
   const [openAlertsTotal, setOpenAlertsTotal] = useState(0);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
+  const [pendingSuggestions, setPendingSuggestions] = useState<SuggestedModule[]>([]);
+  const [activeCollections, setActiveCollections] = useState<Collection[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const [widgets, setWidgets] = useState<WidgetInstance[]>(DEFAULT_WIDGETS);
@@ -133,6 +135,10 @@ export function Dashboard() {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [showCatalog, setShowCatalog] = useState(false);
   const [configuringId, setConfiguringId] = useState<string | null>(null);
+  const [showTemplates, setShowTemplates] = useState(false);
+  // The layout a template or the random button just replaced, so one click
+  // brings it back.
+  const [previousLayout, setPreviousLayout] = useState<WidgetInstance[] | null>(null);
 
   const { width, containerRef, mounted } = useContainerWidth();
   // The layout as last loaded from / saved to the master. Autosave compares
@@ -170,12 +176,14 @@ export function Dashboard() {
     let cancelled = false;
     const load = async () => {
       try {
-        const [a, s, c, al, tr] = await Promise.all([
+        const [a, s, c, al, tr, sug, col] = await Promise.all([
           api.listAgents(),
           api.topSignatures(50),
           api.recentCommands({ limit: 50 }),
           api.listAlerts({ status: "open", limit: 500 }),
           api.denialTrend({ days: 14 }),
+          api.listSuggestedModules({ status: "pending", limit: 50 }),
+          api.listCollections({ limit: 50 }),
         ]);
         if (cancelled) return;
         setAgents(a ?? []);
@@ -184,6 +192,8 @@ export function Dashboard() {
         setAllOpenAlerts(al.alerts ?? []);
         setOpenAlertsTotal(al.total);
         setTrend(tr ?? []);
+        setPendingSuggestions(sug.modules ?? []);
+        setActiveCollections(col ?? []);
         setError(null);
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
@@ -208,6 +218,8 @@ export function Dashboard() {
     complianceScore,
     complianceResults,
     trend,
+    pendingSuggestions,
+    activeCollections,
   };
 
   // Debounced autosave: any add/remove/move/resize/setting change lands
@@ -288,6 +300,25 @@ export function Dashboard() {
     if (type === "chart") setConfiguringId(id);
   };
 
+  // Rows of the grid that fit between its top and the bottom of the window.
+  const viewportRows = () => {
+    const gridTop = containerRef.current?.getBoundingClientRect().top ?? 180;
+    const available = window.innerHeight - gridTop - 56;
+    return Math.floor((available + MARGIN[1]) / (ROW_HEIGHT + MARGIN[1]));
+  };
+
+  const replaceLayout = (next: WidgetInstance[]) => {
+    setPreviousLayout(widgets);
+    setWidgets(next);
+    setShowCatalog(false);
+  };
+
+  const applyTemplate = (template: DashboardTemplate) => {
+    window.scrollTo({ top: 0 });
+    replaceLayout(placeTemplate(template, rowsForViewport(viewportRows())).map((p) => ({ id: randomUUID(), ...p })));
+    setShowTemplates(false);
+  };
+
   // A random dashboard that fills exactly one screen: the rows that fit
   // between the top of the grid and the bottom of the window are split, at
   // random, into cells that tile the whole 12-column area with no gap or
@@ -307,9 +338,7 @@ export function Dashboard() {
     };
 
     window.scrollTo({ top: 0 });
-    const gridTop = containerRef.current?.getBoundingClientRect().top ?? 180;
-    const available = window.innerHeight - gridTop - 56;
-    const rows = clamp(Math.floor((available + MARGIN[1]) / (ROW_HEIGHT + MARGIN[1])), 9, 28);
+    const rows = clamp(viewportRows(), 9, 28);
 
     type Cell = { x: number; y: number; w: number; h: number };
     const MIN = 3;
@@ -347,16 +376,6 @@ export function Dashboard() {
       }
       return shuffle(WIDGET_CATALOG).find((t) => fits(t, c)) ?? "stat-agents";
     };
-    const limitFor = (type: WidgetType, c: Cell): number | undefined => {
-      if (!WIDGET_DEFS[type].hasLimit) return undefined;
-      const heightPx = c.h * (ROW_HEIGHT + MARGIN[1]) - 75;
-      if (type === "agents-vignettes") {
-        const perRow = Math.max(1, Math.floor((c.w * 100 - 32) / 136));
-        return clamp(perRow * Math.max(1, Math.floor(heightPx / 72)), 2, 50);
-      }
-      return clamp(Math.floor(heightPx / 38), 2, 50);
-    };
-
     // About half the cells become a chart tile: KPI-style types for the
     // small ones, any other family for the larger ones.
     const kpiCharts = ALL_CHART_IDS.filter((id) => isTileSized(id));
@@ -377,13 +396,12 @@ export function Dashboard() {
       assigned.set(cell, type);
     }
 
-    setWidgets(
+    replaceLayout(
       cells.map((cell) => {
         const type = assigned.get(cell) as WidgetType;
-        return { id: randomUUID(), type, x: cell.x, y: cell.y, w: cell.w, h: cell.h, limit: limitFor(type, cell), config: chartConfigs.get(cell) };
+        return { id: randomUUID(), type, x: cell.x, y: cell.y, w: cell.w, h: cell.h, limit: fitLimit(type, cell.w, cell.h), config: chartConfigs.get(cell) };
       }),
     );
-    setShowCatalog(false);
   };
 
   const removeWidget = (id: string) => setWidgets((prev) => prev.filter((w) => w.id !== id));
@@ -406,6 +424,30 @@ export function Dashboard() {
             <span style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>
               {saveState === "saving" ? t("dashboard.savingLayout") : saveState === "saved" ? t("dashboard.layoutSaved") : ""}
             </span>
+            {previousLayout && (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setWidgets(previousLayout);
+                  setPreviousLayout(null);
+                }}
+                title={t("dashboard.undoLayoutHint")}
+              >
+                <i className="ph ph-arrow-counter-clockwise" /> {t("dashboard.undoLayout")}
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setShowTemplates(true);
+                setShowCatalog(false);
+              }}
+              title={t("dashboard.templatesHint")}
+            >
+              <i className="ph ph-layout" /> {t("dashboard.templatesButton")}
+            </button>
             <button type="button" className="btn btn-secondary" onClick={randomizeLayout} title={t("dashboard.randomizeHint")}>
               <i className="ph ph-shuffle" /> {t("dashboard.randomize")}
             </button>
@@ -488,7 +530,7 @@ export function Dashboard() {
             autoSize
           >
             {widgets.map((w) => {
-              const { title, body, headerAction, scrollable } = renderWidgetContent(w, data, t, locale);
+              const { title, body, headerAction, scrollable } = renderWidgetContent(w, data, t, locale, editMode);
               const def = WIDGET_DEFS[w.type];
               return (
                 <div key={w.id}>
@@ -510,6 +552,8 @@ export function Dashboard() {
           </GridLayout>
         )}
       </div>
+
+      {showTemplates && <TemplatePicker onPick={applyTemplate} onClose={() => setShowTemplates(false)} />}
 
       {configuringId &&
         (() => {

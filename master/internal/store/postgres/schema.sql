@@ -234,6 +234,19 @@ CREATE TABLE IF NOT EXISTS history_denials_hourly (
 );
 CREATE INDEX IF NOT EXISTS idx_history_denials_agent ON history_denials_hourly (agent_id, bucket);
 
+-- When each denial signature was first counted: what "new signatures per
+-- day" reads. Kept apart from the hourly table so the question does not need
+-- a scan of every hourly row. first_seen only ever moves earlier.
+CREATE TABLE IF NOT EXISTS history_signatures (
+    scontext   TEXT NOT NULL,
+    tcontext   TEXT NOT NULL,
+    tclass     TEXT NOT NULL,
+    perms      TEXT NOT NULL,
+    first_seen TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (scontext, tcontext, tclass, perms)
+);
+CREATE INDEX IF NOT EXISTS idx_history_signatures_first_seen ON history_signatures (first_seen);
+
 -- Rule deployments. Filled by a trigger on commands, so it captures every
 -- code path that creates or updates a command; there is deliberately no
 -- DELETE trigger.
@@ -247,12 +260,15 @@ CREATE TABLE IF NOT EXISTS history_commands (
     acked_at   TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_history_commands_created ON history_commands (created_at);
+-- The agent's answer, kept (truncated) so the most frequent failures stay
+-- countable after the command itself is gone.
+ALTER TABLE history_commands ADD COLUMN IF NOT EXISTS result_message TEXT NOT NULL DEFAULT '';
 
 CREATE OR REPLACE FUNCTION history_track_command() RETURNS trigger AS $$
 BEGIN
-    INSERT INTO history_commands (id, agent_id, type, status, is_revert, created_at, acked_at)
-    VALUES (NEW.id, NEW.agent_id, NEW.type, NEW.status, NEW.reverts_command_id IS NOT NULL, NEW.created_at, NEW.acked_at)
-    ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, acked_at = EXCLUDED.acked_at;
+    INSERT INTO history_commands (id, agent_id, type, status, is_revert, created_at, acked_at, result_message)
+    VALUES (NEW.id, NEW.agent_id, NEW.type, NEW.status, NEW.reverts_command_id IS NOT NULL, NEW.created_at, NEW.acked_at, LEFT(NEW.result_message, 500))
+    ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, acked_at = EXCLUDED.acked_at, result_message = EXCLUDED.result_message;
     RETURN NULL;
 END
 $$ LANGUAGE plpgsql;
@@ -262,6 +278,8 @@ CREATE OR REPLACE TRIGGER history_commands_track
 INSERT INTO history_commands (id, agent_id, type, status, is_revert, created_at, acked_at)
     SELECT id, agent_id, type, status, reverts_command_id IS NOT NULL, created_at, acked_at FROM commands
     ON CONFLICT (id) DO NOTHING;
+UPDATE history_commands h SET result_message = LEFT(c.result_message, 500)
+    FROM commands c WHERE c.id = h.id AND h.result_message = '' AND c.result_message <> '';
 
 -- Alerts, same mechanism as deployments.
 CREATE TABLE IF NOT EXISTS history_alerts (
@@ -274,12 +292,13 @@ CREATE TABLE IF NOT EXISTS history_alerts (
     acknowledged_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_history_alerts_created ON history_alerts (created_at);
+ALTER TABLE history_alerts ADD COLUMN IF NOT EXISTS acknowledged_by TEXT NOT NULL DEFAULT '';
 
 CREATE OR REPLACE FUNCTION history_track_alert() RETURNS trigger AS $$
 BEGIN
-    INSERT INTO history_alerts (id, type, severity, agent_id, status, created_at, acknowledged_at)
-    VALUES (NEW.id, NEW.type, NEW.severity, NEW.agent_id, NEW.status, NEW.created_at, NEW.acknowledged_at)
-    ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, acknowledged_at = EXCLUDED.acknowledged_at;
+    INSERT INTO history_alerts (id, type, severity, agent_id, status, created_at, acknowledged_at, acknowledged_by)
+    VALUES (NEW.id, NEW.type, NEW.severity, NEW.agent_id, NEW.status, NEW.created_at, NEW.acknowledged_at, NEW.acknowledged_by)
+    ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, acknowledged_at = EXCLUDED.acknowledged_at, acknowledged_by = EXCLUDED.acknowledged_by;
     RETURN NULL;
 END
 $$ LANGUAGE plpgsql;
@@ -289,6 +308,8 @@ CREATE OR REPLACE TRIGGER history_alerts_track
 INSERT INTO history_alerts (id, type, severity, agent_id, status, created_at, acknowledged_at)
     SELECT id, type, severity, agent_id, status, created_at, acknowledged_at FROM alerts
     ON CONFLICT (id) DO NOTHING;
+UPDATE history_alerts h SET acknowledged_by = a.acknowledged_by
+    FROM alerts a WHERE a.id = h.id AND h.acknowledged_by = '' AND a.acknowledged_by <> '';
 
 -- Fleet state, sampled on a timer (see history.Sampler): one row per agent
 -- and sample time, with the compliance score computed the same way the

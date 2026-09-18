@@ -383,13 +383,18 @@ très peu.
 API : `GET /api/history/{denials|commands|alerts|fleet}?days=30&bucket=day&group=agent,tclass`
 (`bucket` : `hour|day|week|month|none` ; `group` : jusqu'à 4 dimensions d'une
 liste fixe propre à chaque jeu de données, rien n'est jamais interpolé dans le
-SQL) et `GET /api/history` (depuis quand l'historique existe, par jeu de données).
+SQL ; `from=<secondes unix>` remplace `days` par un début de fenêtre exact — les
+graphiques s'en servent pour que toutes leurs requêtes portent sur les mêmes
+lignes, donc que chaque total soit le même quelle que soit la façon de le
+découper) et `GET /api/history` (depuis quand l'historique existe, par jeu de données).
 
 Côté interface, la page **Graphiques** (menu Vue d'ensemble) montre les 45 types
 de graphiques (classiques, répartition, KPI, statistiques, corrélation) sur l'un
 de ces quatre jeux de données ; **Ajouter au dashboard** en fait une vignette,
 reconfigurable depuis le dashboard en mode « Personnaliser ». Chaque graphique
-peut aussi s'afficher en tableau. `npm test` (dans `frontend/`) exécute les tests
+peut aussi s'afficher en tableau. Une variation « vs période précédente » n'est
+affichée que si l'historique couvre toute cette période précédente ; sinon la
+vignette dit qu'il n'y a rien à comparer plutôt que d'inventer un écart. `npm test` (dans `frontend/`) exécute les tests
 des calculs (quartiles, densité, corrélation, hexbin…).
 
 ## Volumétrie : dimensionner pour un gros volume de denials

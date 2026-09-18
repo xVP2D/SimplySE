@@ -1,28 +1,17 @@
 import { lazy, Suspense, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import type { Agent, Alert, Command, TopSignature, TrendPoint } from "./api";
+import type { Agent, Alert, Collection, Command, SuggestedModule, TopSignature, TrendPoint } from "./api";
 import type { AgentCompliance } from "./compliance";
+import { agentsNeedingAttention, type AttentionReason } from "./attention";
 // ECharts is heavy: it is only fetched once a chart tile is actually shown.
 const ChartView = lazy(() => import("../charts/ChartView").then((m) => ({ default: m.ChartView })));
 import { ALL_CHART_IDS, isTileSized } from "../charts/ids";
 import { DEFAULT_CHART } from "../charts/datasets";
+import { chartDataTitle } from "../charts/titles";
 import type { ChartConfig } from "../charts/types";
+import { WIDGET_MIN, type WidgetType } from "./dashboardGrid.ts";
 
-export type WidgetType =
-  | "stat-agents"
-  | "stat-enforcing"
-  | "stat-denials"
-  | "stat-commands"
-  | "stat-alerts"
-  | "stat-compliance"
-  | "top-signatures"
-  | "recent-deployments"
-  | "open-alerts"
-  | "denial-trend"
-  | "agents-vignettes"
-  | "compliance-checks"
-  | "agents-by-mode"
-  | "chart";
+export type { WidgetType };
 
 // Everything the widget grid needs to render any widget instance — fetched
 // once by the Dashboard page (same polling loop as before this became
@@ -37,6 +26,8 @@ export interface DashboardData {
   complianceScore: number;
   complianceResults: AgentCompliance[];
   trend: TrendPoint[];
+  pendingSuggestions: SuggestedModule[];
+  activeCollections: Collection[];
 }
 
 export interface WidgetDef {
@@ -51,17 +42,17 @@ export interface WidgetDef {
 }
 
 export const WIDGET_DEFS: Record<WidgetType, WidgetDef> = {
-  "stat-agents": { type: "stat-agents", labelKey: "dashboard.widgets.statAgents", defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 } },
-  "stat-enforcing": { type: "stat-enforcing", labelKey: "dashboard.widgets.statEnforcing", defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 } },
-  "stat-denials": { type: "stat-denials", labelKey: "dashboard.widgets.statDenials", defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 } },
-  "stat-commands": { type: "stat-commands", labelKey: "dashboard.widgets.statCommands", defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 } },
-  "stat-alerts": { type: "stat-alerts", labelKey: "dashboard.widgets.statAlerts", defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 } },
-  "stat-compliance": { type: "stat-compliance", labelKey: "dashboard.widgets.statCompliance", defaultSize: { w: 4, h: 4 }, minSize: { w: 3, h: 3 } },
+  "stat-agents": { type: "stat-agents", labelKey: "dashboard.widgets.statAgents", defaultSize: { w: 4, h: 4 }, minSize: WIDGET_MIN["stat-agents"] },
+  "stat-enforcing": { type: "stat-enforcing", labelKey: "dashboard.widgets.statEnforcing", defaultSize: { w: 4, h: 4 }, minSize: WIDGET_MIN["stat-enforcing"] },
+  "stat-denials": { type: "stat-denials", labelKey: "dashboard.widgets.statDenials", defaultSize: { w: 4, h: 4 }, minSize: WIDGET_MIN["stat-denials"] },
+  "stat-commands": { type: "stat-commands", labelKey: "dashboard.widgets.statCommands", defaultSize: { w: 4, h: 4 }, minSize: WIDGET_MIN["stat-commands"] },
+  "stat-alerts": { type: "stat-alerts", labelKey: "dashboard.widgets.statAlerts", defaultSize: { w: 4, h: 4 }, minSize: WIDGET_MIN["stat-alerts"] },
+  "stat-compliance": { type: "stat-compliance", labelKey: "dashboard.widgets.statCompliance", defaultSize: { w: 4, h: 4 }, minSize: WIDGET_MIN["stat-compliance"] },
   "top-signatures": {
     type: "top-signatures",
     labelKey: "dashboard.widgets.topSignatures",
     defaultSize: { w: 4, h: 8 },
-    minSize: { w: 3, h: 4 },
+    minSize: WIDGET_MIN["top-signatures"],
     hasLimit: true,
     defaultLimit: 6,
   },
@@ -69,7 +60,7 @@ export const WIDGET_DEFS: Record<WidgetType, WidgetDef> = {
     type: "recent-deployments",
     labelKey: "dashboard.widgets.recentDeployments",
     defaultSize: { w: 4, h: 8 },
-    minSize: { w: 3, h: 4 },
+    minSize: WIDGET_MIN["recent-deployments"],
     hasLimit: true,
     defaultLimit: 6,
   },
@@ -77,7 +68,7 @@ export const WIDGET_DEFS: Record<WidgetType, WidgetDef> = {
     type: "open-alerts",
     labelKey: "dashboard.widgets.openAlerts",
     defaultSize: { w: 4, h: 8 },
-    minSize: { w: 3, h: 4 },
+    minSize: WIDGET_MIN["open-alerts"],
     hasLimit: true,
     defaultLimit: 6,
   },
@@ -85,13 +76,13 @@ export const WIDGET_DEFS: Record<WidgetType, WidgetDef> = {
     type: "denial-trend",
     labelKey: "dashboard.widgets.denialTrend",
     defaultSize: { w: 6, h: 8 },
-    minSize: { w: 4, h: 5 },
+    minSize: WIDGET_MIN["denial-trend"],
   },
   "agents-vignettes": {
     type: "agents-vignettes",
     labelKey: "dashboard.widgets.agentsVignettes",
     defaultSize: { w: 6, h: 8 },
-    minSize: { w: 3, h: 4 },
+    minSize: WIDGET_MIN["agents-vignettes"],
     hasLimit: true,
     defaultLimit: 12,
   },
@@ -99,19 +90,43 @@ export const WIDGET_DEFS: Record<WidgetType, WidgetDef> = {
     type: "compliance-checks",
     labelKey: "dashboard.widgets.complianceChecks",
     defaultSize: { w: 6, h: 6 },
-    minSize: { w: 3, h: 4 },
+    minSize: WIDGET_MIN["compliance-checks"],
   },
   "agents-by-mode": {
     type: "agents-by-mode",
     labelKey: "dashboard.widgets.agentsByMode",
     defaultSize: { w: 6, h: 6 },
-    minSize: { w: 3, h: 4 },
+    minSize: WIDGET_MIN["agents-by-mode"],
+  },
+  "pending-suggestions": {
+    type: "pending-suggestions",
+    labelKey: "dashboard.widgets.pendingSuggestions",
+    defaultSize: { w: 4, h: 8 },
+    minSize: WIDGET_MIN["pending-suggestions"],
+    hasLimit: true,
+    defaultLimit: 6,
+  },
+  "active-collections": {
+    type: "active-collections",
+    labelKey: "dashboard.widgets.activeCollections",
+    defaultSize: { w: 4, h: 8 },
+    minSize: WIDGET_MIN["active-collections"],
+    hasLimit: true,
+    defaultLimit: 6,
+  },
+  "attention-agents": {
+    type: "attention-agents",
+    labelKey: "dashboard.widgets.attentionAgents",
+    defaultSize: { w: 4, h: 8 },
+    minSize: WIDGET_MIN["attention-agents"],
+    hasLimit: true,
+    defaultLimit: 6,
   },
   chart: {
     type: "chart",
     labelKey: "dashboard.widgets.chart",
     defaultSize: { w: 6, h: 8 },
-    minSize: { w: 2, h: 3 },
+    minSize: WIDGET_MIN["chart"],
   },
 };
 
@@ -129,6 +144,9 @@ export const WIDGET_CATALOG: WidgetType[] = [
   "agents-vignettes",
   "compliance-checks",
   "agents-by-mode",
+  "pending-suggestions",
+  "active-collections",
+  "attention-agents",
   "chart",
 ];
 
@@ -248,6 +266,28 @@ function modeTagClass(mode: string): string {
       return "tag tag-neutral";
   }
 }
+
+function collectionStatusTag(status: string): string {
+  switch (status) {
+    case "done":
+      return "tag tag-accent";
+    case "failed":
+      return "tag tag-outline";
+    case "collecting":
+    case "collected":
+      return "tag tag-accent-2";
+    default:
+      return "tag tag-neutral";
+  }
+}
+
+const ATTENTION_TAG_CLASS: Record<AttentionReason, string> = {
+  offline: "tag tag-neutral",
+  disabled: "tag tag-danger",
+  permissive: "tag tag-accent-2",
+  policyMismatch: "tag tag-outline",
+  outdated: "tag tag-outline",
+};
 
 interface TrendChartPoint {
   day: number;
@@ -442,8 +482,9 @@ export function renderWidgetContent(
   data: DashboardData,
   t: (key: string, vars?: Record<string, string | number>) => string,
   locale: string,
+  editing = false,
 ): { title?: string; body: React.ReactNode; headerAction?: React.ReactNode; scrollable?: boolean } {
-  const { agents, topSignatures, recentCommands, openAlerts, openAlertsTotal, complianceScore, complianceResults, trend } = data;
+  const { agents, topSignatures, recentCommands, openAlerts, openAlertsTotal, complianceScore, complianceResults, trend, pendingSuggestions, activeCollections } = data;
 
   switch (widget.type) {
     case "stat-agents": {
@@ -695,10 +736,13 @@ export function renderWidgetContent(
       const config = widget.config ?? DEFAULT_CHART;
       const known = ALL_CHART_IDS.includes(config.chart);
       return {
-        title: known ? `${t("charts.types." + config.chart)} (${t("charts.datasets." + config.dataset)})` : t("charts.unknownChart"),
+        // Viewing shows what the tile is about (the data and the period); only
+        // while customizing does it name the chart type, which is what the
+        // operator is choosing between.
+        title: !known ? t("charts.unknownChart") : editing ? `${t("charts.types." + config.chart)} (${t("charts.datasets." + config.dataset)})` : chartDataTitle(config, t),
         body: (
           <Suspense fallback={<span style={{ color: "var(--color-neutral-500)", fontSize: 13 }}>{t("common.loading")}</span>}>
-            <ChartView config={config} compact={isTileSized(config.chart) || widget.h <= 5} />
+            <ChartView config={config} compact={isTileSized(config.chart) || widget.h <= 5} bare={!editing} />
           </Suspense>
         ),
       };
@@ -726,6 +770,121 @@ export function renderWidgetContent(
       return {
         title: t("dashboard.agentsByModeTitle"),
         body: <HorizontalBarChart bars={bars} />,
+      };
+    }
+    case "pending-suggestions": {
+      const limit = widget.limit ?? WIDGET_DEFS[widget.type].defaultLimit ?? 6;
+      const rows = pendingSuggestions.slice(0, limit);
+      return {
+        title: t("dashboard.pendingSuggestionsTitle", { count: pendingSuggestions.length }),
+        scrollable: true,
+        headerAction: (
+          <Link to="/suggestions" className="btn btn-ghost no-drag">
+            {t("common.viewAll")}
+          </Link>
+        ),
+        body: (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {rows.map((s) => (
+              <div
+                key={s.id}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 2,
+                  padding: "8.4px 0",
+                  borderBottom: "1px solid color-mix(in srgb, var(--color-text) 8%, transparent)",
+                }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 500, ...singleLine }}>{s.module_name}</span>
+                <span style={{ fontSize: 11.5, color: "var(--color-neutral-500)", fontFamily: "var(--font-mono)", ...singleLine }}>
+                  {s.agent_id} · {s.scontext} → {s.tcontext}
+                </span>
+              </div>
+            ))}
+            {rows.length === 0 && <p style={{ color: "var(--color-neutral-500)", fontSize: 13 }}>{t("dashboard.noPendingSuggestions")}</p>}
+          </div>
+        ),
+      };
+    }
+    case "active-collections": {
+      const limit = widget.limit ?? WIDGET_DEFS[widget.type].defaultLimit ?? 6;
+      const rows = activeCollections.slice(0, limit);
+      return {
+        title: t("dashboard.activeCollectionsTitle", { count: activeCollections.length }),
+        scrollable: true,
+        headerAction: (
+          <Link to="/collections" className="btn btn-ghost no-drag">
+            {t("common.viewAll")}
+          </Link>
+        ),
+        body: (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {rows.map((c) => (
+              <div
+                key={c.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8.4,
+                  padding: "8.4px 0",
+                  borderBottom: "1px solid color-mix(in srgb, var(--color-text) 8%, transparent)",
+                }}
+              >
+                <span className={collectionStatusTag(c.status)}>{t(`collect.status.${c.status}`)}</span>
+                <span style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+                  <span style={{ fontSize: 12.5, fontFamily: "var(--font-mono)", ...singleLine }}>{c.domain}</span>
+                  <span style={{ fontSize: 11, color: "var(--color-neutral-500)" }}>{c.agent_id}</span>
+                </span>
+                <span style={{ fontSize: 11.5, color: "var(--color-neutral-500)", flex: "none" }}>
+                  {c.status === "collecting" && c.ends_at
+                    ? t("dashboard.collectionEndsAt", { time: new Date(c.ends_at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }) })
+                    : t("dashboard.collectionLines", { count: c.lines_count })}
+                </span>
+              </div>
+            ))}
+            {rows.length === 0 && <p style={{ color: "var(--color-neutral-500)", fontSize: 13 }}>{t("dashboard.noActiveCollections")}</p>}
+          </div>
+        ),
+      };
+    }
+    case "attention-agents": {
+      const limit = widget.limit ?? WIDGET_DEFS[widget.type].defaultLimit ?? 6;
+      const flagged = agentsNeedingAttention(agents);
+      const rows = flagged.slice(0, limit);
+      return {
+        title: t("dashboard.attentionAgentsTitle", { count: flagged.length }),
+        scrollable: true,
+        body: (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {rows.map(({ agent, reasons }) => (
+              <Link
+                key={agent.id}
+                to={`/agents/${agent.id}`}
+                className="no-drag"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8.4,
+                  padding: "8.4px 0",
+                  borderBottom: "1px solid color-mix(in srgb, var(--color-text) 8%, transparent)",
+                  textDecoration: "none",
+                  color: "inherit",
+                }}
+              >
+                <span style={{ fontSize: 12.5, fontWeight: 500, flex: 1, minWidth: 0, ...singleLine }}>{agent.hostname}</span>
+                <span style={{ display: "flex", gap: 4, flex: "none" }}>
+                  {reasons.map((r) => (
+                    <span key={r} className={ATTENTION_TAG_CLASS[r]}>
+                      {t(`dashboard.attentionReason.${r}`)}
+                    </span>
+                  ))}
+                </span>
+              </Link>
+            ))}
+            {rows.length === 0 && <p style={{ color: "var(--color-neutral-500)", fontSize: 13 }}>{t("dashboard.noAttentionAgents")}</p>}
+          </div>
+        ),
       };
     }
   }

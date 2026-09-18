@@ -28,9 +28,35 @@ const bigNumber: CSSProperties = {
   whiteSpace: "nowrap",
   overflow: "hidden",
   textOverflow: "ellipsis",
+  flexShrink: 0, // a short tile crops the bottom, it never squashes the number
 };
 
-const caption: CSSProperties = { fontSize: 12.5, color: "var(--color-neutral-500)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+const caption: CSSProperties = { flexShrink: 0, fontSize: 12.5, color: "var(--color-neutral-500)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+
+// What the KPI is compared against: an objective the operator set, or - by
+// default - the previous period. With neither there is no target at all.
+function targetName(ctx: BuildCtx): string {
+  return ctx.t(ctx.input.kpi.targetSource === "config" ? "charts.target" : "charts.previousPeriod");
+}
+
+function NoTarget({ ctx, big = true }: { ctx: BuildCtx; big?: boolean }) {
+  return (
+    <div style={frame}>
+      <Caption ctx={ctx} />
+      {big && <span style={bigNumber}>{fmt(ctx, ctx.input.kpi.value)}</span>}
+      <span style={caption}>{ctx.t("charts.noTarget")}</span>
+    </div>
+  );
+}
+
+function Caption({ ctx, extra = false }: { ctx: BuildCtx; extra?: boolean }) {
+  if (ctx.bare) return null;
+  return (
+    <span className={extra ? "kpi-extra" : undefined} style={caption}>
+      {caption1(ctx)}
+    </span>
+  );
+}
 
 function caption1(ctx: BuildCtx): string {
   return `${ctx.t(ctx.input.meta.measure.labelKey)} - ${ctx.t("charts.periodLong", { n: ctx.input.meta.days, count: ctx.input.meta.days })}`;
@@ -77,7 +103,8 @@ function DeltaBadge({ ctx, d }: { ctx: BuildCtx; d: Delta | null }) {
   );
 }
 
-function Sparkline({ values, color, height = 34 }: { values: number[]; color: string; height?: number }) {
+// Takes the space the tile has left, between a sliver and 48px.
+function Sparkline({ values, color }: { values: number[]; color: string }) {
   if (values.length < 2) return null;
   const w = 100;
   const h = 32;
@@ -86,10 +113,12 @@ function Sparkline({ values, color, height = 34 }: { values: number[]; color: st
   const pts = values.map((v, i) => [(i / (values.length - 1)) * w, h - 2 - ((v - lo) / (hi - lo || 1)) * (h - 6)]);
   const line = pts.map((p) => p.join(",")).join(" ");
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: "100%", height, display: "block" }} aria-hidden>
-      <polygon points={`0,${h} ${line} ${w},${h}`} fill={color} opacity={0.14} />
-      <polyline points={line} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
+    <div style={{ flex: "1 1 34px", minHeight: 12, maxHeight: 48 }}>
+      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: "100%", height: "100%", display: "block" }} aria-hidden>
+        <polygon points={`0,${h} ${line} ${w},${h}`} fill={color} opacity={0.14} />
+        <polyline points={line} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+      </svg>
+    </div>
   );
 }
 
@@ -97,7 +126,7 @@ function Sparkline({ values, color, height = 34 }: { values: number[]; color: st
 export function kpiCard(ctx: BuildCtx): ReactNode {
   return (
     <div style={frame}>
-      <span style={caption}>{caption1(ctx)}</span>
+      <Caption ctx={ctx} />
       <span style={bigNumber}>{fmt(ctx, ctx.input.kpi.value)}</span>
     </div>
   );
@@ -107,7 +136,7 @@ export function kpiCard(ctx: BuildCtx): ReactNode {
 export function kpiDelta(ctx: BuildCtx): ReactNode {
   return (
     <div style={frame}>
-      <span style={caption}>{caption1(ctx)}</span>
+      <Caption ctx={ctx} />
       <span style={bigNumber}>{fmt(ctx, ctx.input.kpi.value)}</span>
       <DeltaBadge ctx={ctx} d={delta(ctx)} />
     </div>
@@ -118,7 +147,7 @@ export function kpiDelta(ctx: BuildCtx): ReactNode {
 export function kpiSpark(ctx: BuildCtx): ReactNode {
   return (
     <div style={frame}>
-      <span style={caption}>{caption1(ctx)}</span>
+      <Caption ctx={ctx} />
       <span style={bigNumber}>{fmt(ctx, ctx.input.kpi.value)}</span>
       <DeltaBadge ctx={ctx} d={delta(ctx)} />
       <Sparkline values={ctx.input.kpi.spark} color={ctx.tokens.accent} />
@@ -128,6 +157,7 @@ export function kpiSpark(ctx: BuildCtx): ReactNode {
 
 // 24. Progress bar: the value against its target
 export function progress(ctx: BuildCtx): ReactNode {
+  if (ctx.input.kpi.targetSource === "none") return <NoTarget ctx={ctx} />;
   const { value, target } = ctx.input.kpi;
   const ratio = target > 0 ? value / target : 0;
   const p = ctx.input.meta.measure.polarity;
@@ -135,14 +165,14 @@ export function progress(ctx: BuildCtx): ReactNode {
   const color = p === "neutral" ? ctx.tokens.accent : ok ? ctx.tokens.good : ctx.tokens.bad;
   return (
     <div style={frame}>
-      <span style={caption}>{caption1(ctx)}</span>
+      <Caption ctx={ctx} />
       <span style={{ ...bigNumber, fontSize: "clamp(22px, 16cqmin, 44px)" }}>{fmt(ctx, value)}</span>
       <div role="progressbar" aria-valuenow={Math.round(ratio * 100)} aria-valuemin={0} aria-valuemax={100} style={{ height: 12, borderRadius: 6, background: "var(--color-sunken)", overflow: "hidden" }}>
         <div style={{ width: `${Math.min(100, ratio * 100)}%`, height: "100%", background: color, borderRadius: 6 }} />
       </div>
       <span style={{ ...caption, display: "flex", justifyContent: "space-between", gap: 8 }}>
-        <span>{plain(ctx, ratio * 100, 0)} % {ctx.t("charts.ofTarget")}</span>
-        <span>{ctx.t("charts.target")} {fmt(ctx, target)}</span>
+        <span>{plain(ctx, ratio * 100, 0)} % {ctx.t(ctx.input.kpi.targetSource === "config" ? "charts.ofTarget" : "charts.ofPrevious")}</span>
+        <span>{targetName(ctx)} {fmt(ctx, target)}</span>
       </span>
     </div>
   );
@@ -150,13 +180,14 @@ export function progress(ctx: BuildCtx): ReactNode {
 
 // 25. Bullet chart: the value bar over qualitative ranges, with a target mark
 export function bullet(ctx: BuildCtx): ReactNode {
+  if (ctx.input.kpi.targetSource === "none") return <NoTarget ctx={ctx} />;
   const { value, target } = ctx.input.kpi;
   const max = niceMax(Math.max(value, target) * 1.25);
   const x = (v: number) => Math.max(0, Math.min(300, (v / max) * 300));
   const band = (from: number, to: number, opacity: number) => <rect x={x(from)} y={10} width={Math.max(0, x(to) - x(from))} height={30} fill={ctx.tokens.muted} opacity={opacity} />;
   return (
     <div style={frame}>
-      <span style={caption}>{caption1(ctx)}</span>
+      <Caption ctx={ctx} />
       <svg viewBox="0 0 300 64" preserveAspectRatio="none" style={{ width: "100%", height: "clamp(48px, 30cqmin, 96px)" }} role="img" aria-label={`${fmt(ctx, value)} / ${fmt(ctx, target)}`}>
         {band(0, target * 0.5, 0.3)}
         {band(target * 0.5, target, 0.18)}
@@ -168,7 +199,7 @@ export function bullet(ctx: BuildCtx): ReactNode {
       </svg>
       <span style={{ ...caption, display: "flex", justifyContent: "space-between", gap: 8 }}>
         <span style={{ color: "var(--color-text)", fontWeight: 600 }}>{fmt(ctx, value)}</span>
-        <span>{ctx.t("charts.target")} {fmt(ctx, target)}</span>
+        <span>{targetName(ctx)} {fmt(ctx, target)}</span>
       </span>
     </div>
   );
@@ -176,6 +207,7 @@ export function bullet(ctx: BuildCtx): ReactNode {
 
 // 26. Target vs actual
 export function targetActual(ctx: BuildCtx): ReactNode {
+  if (ctx.input.kpi.targetSource === "none") return <NoTarget ctx={ctx} big={false} />;
   const { value, target } = ctx.input.kpi;
   const max = Math.max(value, target) || 1;
   const gap = value - target;
@@ -193,12 +225,12 @@ export function targetActual(ctx: BuildCtx): ReactNode {
   );
   return (
     <div style={{ ...frame, gap: 10 }}>
-      <span style={caption}>{caption1(ctx)}</span>
+      <Caption ctx={ctx} />
       {row(ctx.t("charts.actual"), value, ctx.tokens.accent)}
-      {row(ctx.t("charts.target"), target, ctx.tokens.muted)}
+      {row(targetName(ctx), target, ctx.tokens.muted)}
       <span style={{ fontSize: 13, color, fontWeight: 600 }}>
         <i className={`ph ${gap > 0 ? "ph-arrow-up-right" : gap < 0 ? "ph-arrow-down-right" : "ph-equals"}`} aria-hidden /> {gap > 0 ? "+" : gap < 0 ? "-" : ""}
-        {plain(ctx, Math.abs(gap), 1)} {ctx.t("charts.vsTarget")}
+        {plain(ctx, Math.abs(gap), 1)} {ctx.t(ctx.input.kpi.targetSource === "config" ? "charts.vsTarget" : "charts.vsPrevious")}
       </span>
     </div>
   );
@@ -245,7 +277,7 @@ export function metricCard(ctx: BuildCtx): ReactNode {
   );
   return (
     <div style={{ ...frame, gap: 10 }}>
-      <span className="kpi-extra" style={caption}>{caption1(ctx)}</span>
+      <Caption ctx={ctx} extra />
       <span style={{ ...bigNumber, fontSize: "clamp(24px, 17cqmin, 48px)" }}>{fmt(ctx, k.value)}</span>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 10, borderTop: "1px solid var(--color-divider)", paddingTop: 8 }}>
         {stat(ctx.t("charts.stats.min"), k.min)}
@@ -263,7 +295,7 @@ export function deltaIndicator(ctx: BuildCtx): ReactNode {
   const k = ctx.input.kpi;
   return (
     <div style={{ ...frame, alignItems: "flex-start" }}>
-      <span style={caption}>{caption1(ctx)}</span>
+      <Caption ctx={ctx} />
       {d ? (
         <>
           <span style={{ ...bigNumber, color: d.color, display: "inline-flex", alignItems: "center", gap: "0.18em" }}>
@@ -309,7 +341,7 @@ export function gauge(ctx: BuildCtx): Opt {
         anchor: { show: false },
         title: { show: !ctx.compact, offsetCenter: [0, "34%"], color: ctx.tokens.muted, fontSize: 12 },
         detail: { valueAnimation: true, offsetCenter: [0, ctx.compact ? "8%" : "4%"], fontSize: ctx.compact ? 16 : 32, fontWeight: 600, color: ctx.tokens.text, formatter: (v: number) => fmt(ctx, v) },
-        data: [{ value, name: `${ctx.t("charts.target")} ${fmt(ctx, target)}` }],
+        data: [{ value, name: ctx.input.kpi.targetSource === "none" ? "" : `${targetName(ctx)} ${fmt(ctx, target)}` }],
       },
     ],
   };
@@ -319,7 +351,7 @@ export function gauge(ctx: BuildCtx): Opt {
 export function corrMatrix(ctx: BuildCtx): ReactNode {
   const names = variableNames(ctx);
   const m = correlationMatrix(columns(ctx));
-  const cell = (r: number, i: number, j: number): CSSProperties => ({
+  const cell = (r: number, i: number, j: number): CSSProperties => Number.isNaN(r) ? { padding: "8px 10px", textAlign: "center", color: "var(--color-neutral-500)", border: "2px solid var(--color-surface)" } : ({
     padding: "8px 10px",
     textAlign: "center",
     fontVariantNumeric: "tabular-nums",
@@ -349,8 +381,8 @@ export function corrMatrix(ctx: BuildCtx): ReactNode {
                 {names[i]}
               </th>
               {row.map((r, j) => (
-                <td key={j} style={cell(r, i, j)}>
-                  {plain(ctx, r, 2)}
+                <td key={j} style={cell(r, i, j)} title={Number.isNaN(r) ? ctx.t("charts.noCorrelation") : undefined}>
+                  {Number.isNaN(r) ? "-" : plain(ctx, r, 2)}
                 </td>
               ))}
             </tr>

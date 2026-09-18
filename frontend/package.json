@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test": "node --test tests/charts.test.ts"
+    "test": "node --test tests/charts.test.ts tests/chart-logic.test.ts tests/templates.test.ts tests/attention.test.ts"
   },
   "dependencies": {
     "echarts": "^6.1.0",

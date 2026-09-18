@@ -148,6 +148,9 @@ func run(log *slog.Logger) error {
 	// events that predate it, so it is safe to retry on every boot and never
 	// fatal: worst case the older part of the history is filled in later.
 	hist := history.NewRecorder(pg, log)
+	if err := pg.EnsureSignatures(ctx); err != nil {
+		log.Warn("signature history backfill failed, will retry at next start", "error", err)
+	}
 	if err := history.BackfillDenials(ctx, pg, search, log); err != nil {
 		log.Warn("denial history backfill failed, will retry at next start", "error", err)
 	}

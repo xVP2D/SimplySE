@@ -5,6 +5,20 @@ import type { Bucket, ChartInput, DatasetDef, MeasureDef, Row, TreeNode } from "
 import { OTHER } from "./types.ts";
 
 export const DAY = 86400;
+
+// A duration in seconds, as a short label: "42 s", "3 min", "2 h 15 min".
+// Unit letters are kept short and un-translated (s / min / h read fine in
+// every locale this project ships) since only the number itself is locale-formatted.
+export function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "-";
+  if (seconds < 60) return `${Math.round(seconds)} s`;
+  const totalMin = Math.round(seconds / 60);
+  if (totalMin < 60) return `${totalMin} min`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+
 const SEP = "|~|";
 
 // ── time buckets ─────────────────────────────────────────────────────────
@@ -27,12 +41,28 @@ export function bucketRange(from: number, to: number, b: Bucket): number[] {
   return out;
 }
 
-// The time bucket for a period, and how many days to ask the server for: the
-// period itself plus the one before it, so KPIs can show a change.
-export function bucketFor(days: number): { bucket: Bucket; queryDays: number } {
-  const bucket: Bucket = days <= 2 ? "hour" : days <= 120 ? "day" : "week";
-  return { bucket, queryDays: Math.min(days * 2, 366) };
+// The window a chart covers, in whole buckets: `buckets` of them ending with
+// the current (partial) one, and the same number before it for comparisons.
+// Every query of a chart starts from these instants, so a total computed
+// one way always equals the same total computed another.
+export interface Window {
+  bucket: Bucket;
+  buckets: number;
+  step: number;
+  periodStart: number;
+  previousStart: number;
 }
+
+export function windowFor(days: number, nowSec: number): Window {
+  const bucket: Bucket = days <= 2 ? "hour" : days <= 120 ? "day" : "week";
+  const step = bucketStep(bucket);
+  const buckets = bucket === "hour" ? days * 24 : bucket === "day" ? days : Math.max(1, Math.floor(days / 7));
+  const periodStart = bucketStart(nowSec, bucket) - (buckets - 1) * step;
+  return { bucket, buckets, step, periodStart, previousStart: periodStart - buckets * step };
+}
+
+// The server holds at most a year of history, and it clamps older starts.
+export const MAX_HISTORY_SECONDS = 366 * DAY;
 
 // ── aggregation ──────────────────────────────────────────────────────────
 
@@ -159,9 +189,11 @@ export function histogramBins(values: number[], maxBins = 12): Bin[] {
   return bins;
 }
 
+// Pearson's r, or NaN where it does not exist: a variable that never changes
+// has no correlation with anything, and showing 0 would claim "unrelated".
 export function pearson(a: number[], b: number[]): number {
   const n = Math.min(a.length, b.length);
-  if (n < 2) return 0;
+  if (n < 2) return NaN;
   const ma = mean(a.slice(0, n));
   const mb = mean(b.slice(0, n));
   let num = 0;
@@ -172,11 +204,11 @@ export function pearson(a: number[], b: number[]): number {
     da += (a[i] - ma) ** 2;
     db += (b[i] - mb) ** 2;
   }
-  return da > 0 && db > 0 ? num / Math.sqrt(da * db) : 0;
+  return da > 0 && db > 0 ? num / Math.sqrt(da * db) : NaN;
 }
 
 export function correlationMatrix(columns: number[][]): number[][] {
-  return columns.map((a, i) => columns.map((b, j) => (i === j ? 1 : pearson(a, b))));
+  return columns.map((a, i) => columns.map((b, j) => (i === j ? (Number.isNaN(pearson(a, a)) ? NaN : 1) : pearson(a, b))));
 }
 
 export function ecdf(values: number[]): [number, number][] {
@@ -336,29 +368,37 @@ export interface BuildArgs {
   dim2: string;
   dim3: string;
   days: number;
-  bucket: Bucket;
-  timeRows: Row[]; // bucketed, grouped by dim and dim2, over the period and the one before
-  treeRows: Row[]; // no bucket, grouped by dim, dim2 and dim3, over the period
-  varRows: Row[]; // bucketed by day, grouped by def.variableGroup
+  win: Window;
+  timeRows: Row[]; // bucketed, grouped by dim and dim2, from win.previousStart
+  treeRows: Row[]; // no bucket, grouped by dim, dim2 and dim3, from win.periodStart
+  varRows: Row[]; // bucketed by day, grouped by def.variableGroup, from win.periodStart
+  hourlyRows?: Row[]; // bucketed by hour, ungrouped, from win.periodStart (heat map by hour of day)
   nowSec: number;
+  // when the dataset's history begins (unix seconds); the previous period is
+  // only compared if the history covers all of it
+  sinceSec: number | null;
   truncated: boolean;
   topSeries?: number;
 }
 
 const SAMPLE_CATEGORIES = 8;
 
+// Groups ranked biggest first. A group that carries no observation (nothing
+// was acknowledged, no command failed) has nothing to show and is left out
+// rather than drawn as a zero.
 function rankBy(groups: Map<string, Row[]>, additive: boolean) {
   return [...groups.entries()]
     .map(([name, rows]) => ({ name, rows, ...combine(rows, additive) }))
+    .filter((g) => g.weight > 0)
     .sort((a, b) => b.weight - a.weight || b.value - a.value || a.name.localeCompare(b.name));
 }
 
 export function buildChartInput(a: BuildArgs): ChartInput {
-  const { def, measure, dim, dim2, dim3, days, bucket, nowSec } = a;
+  const { def, measure, dim, dim2, dim3, days, win, nowSec } = a;
+  const { bucket, periodStart, previousStart } = win;
   const additive = measure.additive;
-  const periodStart = bucketStart(nowSec - days * DAY, bucket);
   const current = a.timeRows.filter((r) => r.t !== null && r.t >= periodStart);
-  const before = a.timeRows.filter((r) => r.t !== null && r.t < periodStart);
+  const before = a.timeRows.filter((r) => r.t !== null && r.t >= previousStart && r.t < periodStart);
   const ts = bucketRange(periodStart, nowSec, bucket);
   const tsIndex = new Map(ts.map((t, i) => [t, i]));
   const gap = additive ? 0 : NaN;
@@ -381,37 +421,61 @@ export function buildChartInput(a: BuildArgs): ChartInput {
       const i = tsIndex.get(bucketStart(r.t as number, bucket));
       if (i !== undefined) cells[i].push(r);
     }
-    return cells.map((c) => (c.length ? combine(c, additive).value : gap));
+    return cells.map((c) => {
+      const merged = c.length ? combine(c, additive) : null;
+      return merged && (additive || merged.weight > 0) ? merged.value : gap;
+    });
   };
   const series = seriesRows.map((s) => ({ name: s.name, values: perBucket(s.rows) }));
   const total = perBucket(current);
 
-  // matrix: dim (rows) by dim2 (columns)
-  const rowCats = byCat.slice(0, 8).map((c) => c.name);
-  const colRank = rankBy(groupRows(current, (r) => r.dims[dim2] ?? ""), additive).slice(0, 5);
-  const cols = colRank.map((c) => c.name);
-  const values = rowCats.map(() => cols.map(() => 0));
-  const weights = rowCats.map(() => cols.map(() => 0));
-  const cellGroups = groupRows(current, (r) => (r.dims[dim] ?? "") + SEP + (r.dims[dim2] ?? ""));
-  rowCats.forEach((rc, i) =>
-    cols.forEach((cc, j) => {
-      const rows = cellGroups.get(rc + SEP + cc);
-      if (rows) {
-        const c = combine(rows, additive);
-        values[i][j] = c.value;
-        weights[i][j] = c.weight;
-      }
-    }),
-  );
+  // matrix: dim (rows) by dim2 (columns). What does not fit becomes one
+  // "other" row / column, so the matrix always adds up to the whole.
+  const keepNames = (ranked: { name: string }[], limit: number): { kept: Set<string>; names: string[] } => {
+    const head = ranked.length > limit ? ranked.slice(0, limit - 1) : ranked;
+    const names = head.map((c) => c.name);
+    const kept = new Set(names);
+    if (ranked.length > limit) names.push(OTHER);
+    return { kept, names };
+  };
+  const byCol = rankBy(groupRows(current, (r) => r.dims[dim2] ?? ""), additive);
+  const matrixOf = (rowLimit: number, colLimit: number) => {
+    const rowKeep = keepNames(byCat, rowLimit);
+    const colKeep = keepNames(byCol, colLimit);
+    const rowCats = rowKeep.names;
+    const cols = colKeep.names;
+    const values = rowCats.map(() => cols.map(() => 0));
+    const weights = rowCats.map(() => cols.map(() => 0));
+    const rowName = (r: Row) => (rowKeep.kept.has(r.dims[dim] ?? "") ? (r.dims[dim] ?? "") : OTHER);
+    const colName = (r: Row) => (colKeep.kept.has(r.dims[dim2] ?? "") ? (r.dims[dim2] ?? "") : OTHER);
+    const cellGroups = groupRows(current, (r) => rowName(r) + SEP + colName(r));
+    rowCats.forEach((rc, i) =>
+      cols.forEach((cc, j) => {
+        const rows = cellGroups.get(rc + SEP + cc);
+        if (rows) {
+          const c = combine(rows, additive);
+          values[i][j] = c.value;
+          weights[i][j] = c.weight;
+        }
+      }),
+    );
+    return { rows: rowCats, cols, values, weights };
+  };
+  const matrix = matrixOf(8, 5);
+  const heat = matrixOf(10, 8);
 
   // hierarchy over dim > dim2 > dim3, sized by weight
   const tree = (rows: Row[], keys: string[], depth: number, limit: number[]): TreeNode[] => {
     if (depth >= keys.length) return [];
-    const ranked = rankBy(groupRows(rows, (r) => r.dims[keys[depth]] ?? ""), additive).slice(0, limit[depth]);
-    return ranked.map((g) => {
+    const all = rankBy(groupRows(rows, (r) => r.dims[keys[depth]] ?? ""), additive);
+    // the tail is one "other" leaf, so a node's children always add up to it
+    const head = all.length > limit[depth] ? all.slice(0, limit[depth] - 1) : all;
+    const nodes: TreeNode[] = head.map((g) => {
       const children = tree(g.rows, keys, depth + 1, limit);
       return children.length ? { name: g.name, value: g.weight, children } : { name: g.name, value: g.weight };
     });
+    if (all.length > limit[depth]) nodes.push({ name: OTHER, value: all.slice(limit[depth] - 1).reduce((s, g) => s + g.weight, 0) });
+    return nodes;
   };
   const hierarchy = tree(a.treeRows, [dim, dim2, dim3], 0, [8, 6, 5]);
 
@@ -426,7 +490,8 @@ export function buildChartInput(a: BuildArgs): ChartInput {
   }
 
   // variables per (agent, day) for the statistical and correlation charts
-  const byAgentDay = groupRows(a.varRows, (r) => (r.dims.agent ?? "") + SEP + (r.t ?? 0));
+  const groupDim = def.variableGroup[0];
+  const byAgentDay = groupRows(a.varRows, (r) => (r.dims[groupDim] ?? "") + SEP + (r.t ?? 0));
   const points: ChartInput["points"] = [];
   const varRowsOut: number[][] = [];
   for (const [key, rows] of byAgentDay) {
@@ -438,7 +503,10 @@ export function buildChartInput(a: BuildArgs): ChartInput {
 
   // KPI
   const cur = combine(current, additive);
-  const previous = before.length ? combine(before, additive).value : null;
+  // A comparison is only honest if the history covers the whole previous
+  // period: otherwise "nothing there" means "not recorded yet", not "zero".
+  const previousCovered = a.sinceSec !== null && a.sinceSec <= previousStart && previousStart >= nowSec - MAX_HISTORY_SECONDS;
+  const previous = !previousCovered ? null : before.length ? combine(before, additive).value : additive ? 0 : null;
   let last = 0;
   // carry the last value across gaps so the mini curve stays continuous
   const spark = total.map((v) => {
@@ -463,10 +531,12 @@ export function buildChartInput(a: BuildArgs): ChartInput {
       variableNames: def.variables.map((v) => v.labelKey),
       truncated: a.truncated,
     },
-    empty: current.length === 0,
+    empty: !current.some((r) => r.weight > 0),
     categories,
     time: { ts, series, total },
-    matrix: { rows: rowCats, cols, values, weights },
+    matrix,
+    heat,
+    hourly: (a.hourlyRows ?? []).filter((r) => r.t !== null).map((r) => ({ t: r.t as number, value: r.value, weight: r.weight })),
     hierarchy,
     samples,
     points,
@@ -475,6 +545,7 @@ export function buildChartInput(a: BuildArgs): ChartInput {
       value: cur.value,
       previous,
       target: previous ?? cur.value,
+      targetSource: previous === null ? "none" : "previous",
       spark,
       min: finite.length ? Math.min(...finite) : 0,
       max: finite.length ? Math.max(...finite) : 0,

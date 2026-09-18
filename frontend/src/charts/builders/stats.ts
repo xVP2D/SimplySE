@@ -383,4 +383,84 @@ export function qq(ctx: BuildCtx): Opt {
   };
 }
 
+const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+// Reshapes the flat per-hour history into a 7 (weekday) x 24 (hour) grid —
+// this is the one place an absolute timestamp is split into a pattern, so it
+// lives in the builder rather than in the shared shaping code.
+function weekdayHourGrid(ctx: BuildCtx): { value: number[][]; weight: number[][]; max: number } {
+  const additive = ctx.input.meta.measure.additive;
+  const sum = Array.from({ length: 7 }, () => Array(24).fill(0));
+  const weight = Array.from({ length: 7 }, () => Array(24).fill(0));
+  for (const h of ctx.input.hourly) {
+    const d = new Date(h.t * 1000);
+    const wd = (d.getUTCDay() + 6) % 7; // getUTCDay is Sun=0; shift to Mon=0
+    const hour = d.getUTCHours();
+    sum[wd][hour] += additive ? h.value : h.value * h.weight;
+    weight[wd][hour] += h.weight;
+  }
+  let max = 0;
+  const value = sum.map((row, i) =>
+    row.map((s, j) => {
+      const v = additive ? s : weight[i][j] > 0 ? s / weight[i][j] : NaN;
+      if (!Number.isNaN(v)) max = Math.max(max, v);
+      return v;
+    }),
+  );
+  return { value, weight, max };
+}
+
+// 42. Hour-of-day heatmap: when across the week this measure happens most —
+// a pattern a plain time series cannot show.
+export function hourHeatmap(ctx: BuildCtx): Opt {
+  const { value, weight, max } = weekdayHourGrid(ctx);
+  const days = WEEKDAYS.map((k) => ctx.t("charts.weekday." + k));
+  const data: (number | string)[][] = [];
+  value.forEach((row, i) => row.forEach((v, j) => data.push([j, i, weight[i][j] > 0 ? Math.round(v * 100) / 100 : "-"])));
+  return {
+    ...base(ctx),
+    grid: { left: 8, right: ctx.compact ? 10 : 60, top: 8, bottom: 26, containLabel: true },
+    tooltip: itemTooltip(ctx, (p: Opt) => `${days[p.value[1]]} ${String(p.value[0]).padStart(2, "0")}h<br/><b>${p.value[2] === "-" ? "-" : fmt(ctx, Number(p.value[2]))}</b>`),
+    xAxis: {
+      type: "category",
+      data: Array.from({ length: 24 }, (_, h) => String(h)),
+      splitArea: { show: false },
+      axisTick: { show: false },
+      axisLine: { show: false },
+      axisLabel: { color: ctx.tokens.muted, fontSize: 10, interval: (i: number) => i % 3 === 0, formatter: (v: string) => v + "h" },
+    },
+    yAxis: {
+      type: "category",
+      data: days,
+      inverse: true,
+      axisTick: { show: false },
+      axisLine: { show: false },
+      axisLabel: { color: ctx.tokens.muted, fontSize: 11 },
+    },
+    visualMap: {
+      min: 0,
+      max: max || 1,
+      calculable: false,
+      orient: "vertical",
+      right: 0,
+      top: "middle",
+      itemWidth: 12,
+      itemHeight: 110,
+      show: !ctx.compact,
+      text: [fmt(ctx, max), "0"],
+      textStyle: { color: ctx.tokens.muted, fontSize: 11 },
+      inRange: { color: ctx.tokens.seq },
+    },
+    series: [
+      {
+        type: "heatmap",
+        data,
+        itemStyle: { borderColor: ctx.tokens.surface, borderWidth: 2, borderRadius: 2 },
+        label: { show: false },
+        emphasis: { itemStyle: { borderColor: ctx.tokens.text, borderWidth: 1 } },
+      },
+    ],
+  };
+}
+
 export { short };

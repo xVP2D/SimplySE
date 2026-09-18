@@ -17,7 +17,7 @@ function Message({ icon, text }: { icon: string; text: string }) {
 
 // One chart bound to a saved configuration: loads its data (refreshing every
 // minute), draws it, and lets the reader flip to the table of the same data.
-export function ChartView({ config, compact = false, refreshMs = 60_000 }: { config: ChartConfig; compact?: boolean; refreshMs?: number }) {
+export function ChartView({ config, compact = false, bare = false, refreshMs = 60_000 }: { config: ChartConfig; compact?: boolean; bare?: boolean; refreshMs?: number }) {
   const { t } = useTranslation();
   const { loading, error, input } = useChartInput(config, refreshMs);
   const [table, setTable] = useState(false);
@@ -33,7 +33,7 @@ export function ChartView({ config, compact = false, refreshMs = 60_000 }: { con
           <ChartTable chart={chart} input={input} />
         </div>
       ) : (
-        <ChartRender chart={chart} input={input} compact={compact} />
+        <ChartRender chart={chart} input={input} compact={compact} bare={bare} />
       )}
       <button
         type="button"

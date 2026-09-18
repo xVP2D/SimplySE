@@ -15,12 +15,13 @@ export function variableNames(ctx: BuildCtx): string[] {
 export function corrHeatmap(ctx: BuildCtx): Opt {
   const names = variableNames(ctx);
   const m = correlationMatrix(columns(ctx));
-  const data: number[][] = [];
-  m.forEach((row, i) => row.forEach((r, j) => data.push([j, i, Math.round(r * 100) / 100])));
+  // an undefined coefficient (a variable that never changes) is an empty cell, not a 0
+  const data: (number | string)[][] = [];
+  m.forEach((row, i) => row.forEach((r, j) => data.push([j, i, Number.isNaN(r) ? "-" : Math.round(r * 100) / 100])));
   return {
     ...base(ctx),
     grid: { left: 8, right: ctx.compact ? 10 : 64, top: 8, bottom: 8, containLabel: true },
-    tooltip: itemTooltip(ctx, (p: Opt) => `${names[p.value[1]]} / ${names[p.value[0]]}<br/>r = <b>${plain(ctx, Number(p.value[2]), 2)}</b>`),
+    tooltip: itemTooltip(ctx, (p: Opt) => `${names[p.value[1]]} / ${names[p.value[0]]}<br/>${p.value[2] === "-" ? ctx.t("charts.noCorrelation") : `r = <b>${plain(ctx, Number(p.value[2]), 2)}</b>`}`),
     xAxis: { type: "category", data: names, splitArea: { show: false }, axisTick: { show: false }, axisLine: { show: false }, axisLabel: { color: ctx.tokens.muted, fontSize: 11, interval: 0, width: 70, overflow: "truncate" } },
     yAxis: { type: "category", data: names, inverse: true, axisTick: { show: false }, axisLine: { show: false }, axisLabel: { color: ctx.tokens.muted, fontSize: 11, width: 70, overflow: "truncate" } },
     visualMap: {
@@ -42,7 +43,7 @@ export function corrHeatmap(ctx: BuildCtx): Opt {
         type: "heatmap",
         data,
         itemStyle: { borderColor: ctx.tokens.surface, borderWidth: 2, borderRadius: 3 },
-        label: { show: true, fontSize: ctx.compact ? 11 : 13, color: ctx.tokens.text, formatter: (p: Opt) => plain(ctx, Number(p.value[2]), 2) },
+        label: { show: true, fontSize: ctx.compact ? 11 : 13, color: ctx.tokens.text, formatter: (p: Opt) => (p.value[2] === "-" ? "-" : plain(ctx, Number(p.value[2]), 2)) },
         emphasis: { itemStyle: { borderColor: ctx.tokens.text, borderWidth: 1 } },
       },
     ],

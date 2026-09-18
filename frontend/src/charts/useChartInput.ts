@@ -40,7 +40,7 @@ export function useChartInput(cfg: Pick<ChartConfig, "dataset" | "dim" | "days" 
   // a KPI target set by the operator replaces the default (the previous period)
   const input = useMemo(() => {
     if (!state.input || cfg.target === undefined) return state.input;
-    return { ...state.input, kpi: { ...state.input.kpi, target: cfg.target } };
+    return { ...state.input, kpi: { ...state.input.kpi, target: cfg.target, targetSource: "config" as const } };
   }, [state.input, cfg.target]);
 
   return { ...state, input };

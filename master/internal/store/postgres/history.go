@@ -30,18 +30,70 @@ const upsertDenialSQL = `
 	ON CONFLICT (bucket, agent_id, scontext, tcontext, tclass, perms)
 	DO UPDATE SET count = history_denials_hourly.count + EXCLUDED.count`
 
+const upsertSignatureSQL = `
+	INSERT INTO history_signatures (scontext, tcontext, tclass, perms, first_seen)
+	VALUES ($1, $2, $3, $4, $5)
+	ON CONFLICT (scontext, tcontext, tclass, perms)
+	DO UPDATE SET first_seen = LEAST(history_signatures.first_seen, EXCLUDED.first_seen)`
+
+type signatureKey struct{ scontext, tcontext, tclass, perms string }
+
 func upsertDenialCounts(ctx context.Context, tx *sql.Tx, counts map[DenialKey]int64) error {
 	stmt, err := tx.PrepareContext(ctx, upsertDenialSQL)
 	if err != nil {
 		return fmt.Errorf("prepare denial history upsert: %w", err)
 	}
 	defer stmt.Close()
+	// the earliest hour each signature appears at in this batch
+	first := map[signatureKey]time.Time{}
 	for k, n := range counts {
 		if _, err := stmt.ExecContext(ctx, k.Bucket.UTC(), k.AgentID, k.SContext, k.TContext, k.TClass, k.Perms, n); err != nil {
 			return fmt.Errorf("upsert denial history: %w", err)
 		}
+		sk := signatureKey{k.SContext, k.TContext, k.TClass, k.Perms}
+		if cur, ok := first[sk]; !ok || k.Bucket.Before(cur) {
+			first[sk] = k.Bucket
+		}
+	}
+	sigStmt, err := tx.PrepareContext(ctx, upsertSignatureSQL)
+	if err != nil {
+		return fmt.Errorf("prepare signature upsert: %w", err)
+	}
+	defer sigStmt.Close()
+	for sk, at := range first {
+		if _, err := sigStmt.ExecContext(ctx, sk.scontext, sk.tcontext, sk.tclass, sk.perms, at.UTC()); err != nil {
+			return fmt.Errorf("upsert signature history: %w", err)
+		}
 	}
 	return nil
+}
+
+// EnsureSignatures fills history_signatures from the hourly denials that were
+// recorded before that table existed. It runs once (marked in history_meta);
+// from then on every counted denial keeps the table current.
+func (s *Store) EnsureSignatures(ctx context.Context) error {
+	const key = "signatures_backfilled"
+	if _, done, err := s.HistoryMeta(ctx, key); err != nil || done {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin signature backfill tx: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO history_signatures (scontext, tcontext, tclass, perms, first_seen)
+		SELECT scontext, tcontext, tclass, perms, MIN(bucket) FROM history_denials_hourly GROUP BY 1, 2, 3, 4
+		ON CONFLICT (scontext, tcontext, tclass, perms)
+		DO UPDATE SET first_seen = LEAST(history_signatures.first_seen, EXCLUDED.first_seen)`); err != nil {
+		return fmt.Errorf("backfill signatures: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO history_meta (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING`,
+		key, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		return fmt.Errorf("mark signature backfill done: %w", err)
+	}
+	return tx.Commit()
 }
 
 // AddDenialCounts adds n to each row's count (creating rows as needed), all
@@ -159,6 +211,7 @@ func (s *Store) PurgeHistory(ctx context.Context, retentionDays int) (int64, err
 	var total int64
 	for _, q := range []string{
 		`DELETE FROM history_denials_hourly WHERE bucket < now() - make_interval(days => $1)`,
+		`DELETE FROM history_signatures WHERE first_seen < now() - make_interval(days => $1)`,
 		`DELETE FROM history_commands WHERE created_at < now() - make_interval(days => $1)`,
 		`DELETE FROM history_alerts WHERE created_at < now() - make_interval(days => $1)`,
 		`DELETE FROM history_fleet_samples WHERE ts < now() - make_interval(days => $1)`,
@@ -208,9 +261,19 @@ var historyDatasets = map[string]historyDataset{
 		dims: map[string]string{
 			"agent": "agent_id", "type": "type", "status": "status",
 			"kind": "CASE WHEN is_revert THEN 'revert' ELSE 'deploy' END",
+			// what the agent answered when a command failed, first 80 characters;
+			// empty for every command that did not fail
+			"error": "CASE WHEN status = 'failed' THEN COALESCE(NULLIF(LEFT(BTRIM(result_message), 80), ''), '-') ELSE '' END",
 		},
+		// failure_rate and latency are averages: the client weights them by
+		// count and acked respectively, so merging buckets or groups gives the
+		// pooled figure, not an average of averages. An empty group yields 0
+		// with weight 0, which the client ignores.
 		measures: "COUNT(*)::bigint AS count, COUNT(*) FILTER (WHERE status = 'failed')::bigint AS failed, " +
-			"COUNT(DISTINCT type)::bigint AS types",
+			"COUNT(DISTINCT type)::bigint AS types, COUNT(*) FILTER (WHERE is_revert)::bigint AS reverts, " +
+			"COUNT(*) FILTER (WHERE acked_at IS NOT NULL)::bigint AS acked, " +
+			"COALESCE(AVG(GREATEST(EXTRACT(EPOCH FROM (acked_at - created_at)), 0)) FILTER (WHERE acked_at IS NOT NULL), 0)::float8 AS latency, " +
+			"COALESCE(100.0 * COUNT(*) FILTER (WHERE status = 'failed') / NULLIF(COUNT(*), 0), 0)::float8 AS failure_rate",
 		orderMeasure: "count",
 		totalExpr:    "COUNT(*)::bigint",
 	},
@@ -219,9 +282,23 @@ var historyDatasets = map[string]historyDataset{
 		timeCol: "created_at",
 		dims: map[string]string{
 			"agent": "agent_id", "type": "type", "severity": "severity", "status": "status",
+			"acked_by": "acknowledged_by",
 		},
+		// ack_time is weighted by acked, open_age by open (see the commands note)
 		measures: "COUNT(*)::bigint AS count, COUNT(*) FILTER (WHERE severity = 'high')::bigint AS high, " +
-			"COUNT(DISTINCT type)::bigint AS types",
+			"COUNT(DISTINCT type)::bigint AS types, COUNT(*) FILTER (WHERE acknowledged_at IS NOT NULL)::bigint AS acked, " +
+			"COUNT(*) FILTER (WHERE status = 'open')::bigint AS open, " +
+			"COALESCE(AVG(GREATEST(EXTRACT(EPOCH FROM (acknowledged_at - created_at)), 0)) FILTER (WHERE acknowledged_at IS NOT NULL), 0)::float8 AS ack_time, " +
+			"COALESCE(AVG(EXTRACT(EPOCH FROM (now() - created_at))) FILTER (WHERE status = 'open'), 0)::float8 AS open_age",
+		orderMeasure: "count",
+		totalExpr:    "COUNT(*)::bigint",
+	},
+	"signatures": {
+		table:   "history_signatures",
+		timeCol: "first_seen",
+		dims:    map[string]string{"tclass": "tclass", "scontext": "scontext", "tcontext": "tcontext", "perms": "perms"},
+		measures: "COUNT(*)::bigint AS count, COUNT(DISTINCT tclass)::bigint AS classes, " +
+			"COUNT(DISTINCT scontext)::bigint AS sources",
 		orderMeasure: "count",
 		totalExpr:    "COUNT(*)::bigint",
 	},
@@ -269,18 +346,24 @@ const (
 
 var historyBuckets = map[string]string{"hour": "hour", "day": "day", "week": "week", "month": "month", "none": ""}
 
-// HistoryQuery is a validated request for aggregated history.
+// HistoryQuery is a validated request for aggregated history. From is the
+// exact start of the window: callers that combine several queries (a chart
+// needs a bucketed one and a total one) pass the same From so every figure
+// covers the same rows.
 type HistoryQuery struct {
 	Dataset string
 	Days    int
+	From    time.Time
 	Bucket  string // hour | day | week | month | none
 	Group   []string
 }
 
 // NormalizeHistoryQuery validates client input: unknown datasets, buckets
-// and dimensions are rejected (never passed through), days is clamped, and a
-// dimension repeated twice is dropped.
-func NormalizeHistoryQuery(dataset string, days int, bucket string, group []string) (HistoryQuery, error) {
+// and dimensions are rejected (never passed through), the window is clamped
+// to the longest one the history can hold, and a dimension repeated twice is
+// dropped. fromUnix > 0 sets the window's exact start and takes precedence
+// over days; now is a parameter so the result is reproducible in tests.
+func NormalizeHistoryQuery(dataset string, days int, fromUnix int64, now time.Time, bucket string, group []string) (HistoryQuery, error) {
 	def, ok := historyDatasets[dataset]
 	if !ok {
 		return HistoryQuery{}, fmt.Errorf("unknown history dataset %q (known: %s)", dataset, strings.Join(HistoryDatasets(), ", "))
@@ -298,7 +381,7 @@ func NormalizeHistoryQuery(dataset string, days int, bucket string, group []stri
 		return HistoryQuery{}, fmt.Errorf("unknown bucket %q (known: hour, day, week, month, none)", bucket)
 	}
 	seen := map[string]bool{}
-	var dims []string
+	dims := []string{} // never nil: the API always encodes this as [], not null
 	for _, g := range group {
 		g = strings.TrimSpace(g)
 		if g == "" || seen[g] {
@@ -313,7 +396,17 @@ func NormalizeHistoryQuery(dataset string, days int, bucket string, group []stri
 	if len(dims) > maxHistoryDims {
 		return HistoryQuery{}, fmt.Errorf("at most %d grouping dimensions", maxHistoryDims)
 	}
-	return HistoryQuery{Dataset: dataset, Days: days, Bucket: bucket, Group: dims}, nil
+	from := now.Add(-time.Duration(days) * 24 * time.Hour)
+	if fromUnix > 0 {
+		from = time.Unix(fromUnix, 0)
+		if oldest := now.Add(-time.Duration(maxHistoryDays) * 24 * time.Hour); from.Before(oldest) {
+			from = oldest
+		}
+		if from.After(now) {
+			from = now
+		}
+	}
+	return HistoryQuery{Dataset: dataset, Days: days, From: from.UTC(), Bucket: bucket, Group: dims}, nil
 }
 
 // buildHistorySQL turns a validated query into SQL. Every interpolated piece
@@ -345,7 +438,7 @@ func buildHistorySQL(q HistoryQuery) (string, error) {
 		order = append(order, pos)
 	}
 	sel = append(sel, def.measures)
-	stmt := fmt.Sprintf(`SELECT %s FROM %s WHERE %s >= now() - make_interval(days => $1)`,
+	stmt := fmt.Sprintf(`SELECT %s FROM %s WHERE %s >= $1`,
 		strings.Join(sel, ", "), def.table, def.timeCol)
 	if len(group) > 0 {
 		stmt += " GROUP BY " + strings.Join(group, ", ")
@@ -371,7 +464,7 @@ func (s *Store) QueryHistory(ctx context.Context, q HistoryQuery) (HistoryResult
 	if err != nil {
 		return HistoryResult{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, stmt, q.Days)
+	rows, err := s.db.QueryContext(ctx, stmt, q.From)
 	if err != nil {
 		return HistoryResult{}, fmt.Errorf("query history %s: %w", q.Dataset, err)
 	}

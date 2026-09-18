@@ -4,10 +4,10 @@
 export type ChartCategory = "classic" | "share" | "kpi" | "stats" | "corr";
 
 export const CHART_IDS: Record<ChartCategory, string[]> = {
-  classic: ["bar", "column", "bar-h", "grouped-bar", "stacked-bar", "stacked-100", "line", "multi-line", "area", "stacked-area", "step", "combo", "waterfall"],
+  classic: ["bar", "column", "bar-h", "grouped-bar", "stacked-bar", "stacked-100", "line", "multi-line", "area", "stacked-area", "step", "combo", "waterfall", "heatmap"],
   share: ["pie", "donut", "semi-donut", "treemap", "sunburst", "marimekko"],
   kpi: ["kpi", "kpi-delta", "kpi-spark", "gauge", "progress", "bullet", "target-actual", "scorecard", "metric-card", "delta"],
-  stats: ["histogram", "boxplot", "violin", "scatter", "bubble", "density", "dot-plot", "strip", "beeswarm", "ecdf", "pareto", "qq"],
+  stats: ["histogram", "boxplot", "violin", "scatter", "bubble", "density", "dot-plot", "strip", "beeswarm", "ecdf", "pareto", "qq", "hour-heatmap"],
   corr: ["corr-matrix", "corr-heatmap", "pair-plot", "hexbin"],
 };
 

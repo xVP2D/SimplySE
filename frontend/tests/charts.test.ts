@@ -4,13 +4,13 @@ import {
   DAY,
   beeswarm,
   boxStats,
-  bucketFor,
   bucketRange,
   bucketStart,
   buildChartInput,
   combine,
   correlationMatrix,
   ecdf,
+  formatDuration,
   hexbin,
   histogramBins,
   kde,
@@ -20,6 +20,7 @@ import {
   pearson,
   qqPoints,
   quantile,
+  windowFor,
 } from "../src/charts/shape.ts";
 import type { DatasetDef, MeasureDef, Row } from "../src/charts/types.ts";
 
@@ -36,10 +37,27 @@ test("weeks start on Monday, like Postgres date_trunc('week')", () => {
   assert.equal(bucketStart(friday, "hour"), Date.UTC(2026, 8, 18, 15) / 1000);
 });
 
-test("bucketFor asks for the period and the one before, capped at a year", () => {
-  assert.deepEqual(bucketFor(1), { bucket: "hour", queryDays: 2 });
-  assert.deepEqual(bucketFor(30), { bucket: "day", queryDays: 60 });
-  assert.deepEqual(bucketFor(365), { bucket: "week", queryDays: 366 });
+test("a window is a whole number of buckets, the previous one the same length", () => {
+  const now = Date.UTC(2026, 8, 18, 15, 30) / 1000; // a Friday afternoon
+  const day = windowFor(30, now);
+  assert.equal(day.bucket, "day");
+  assert.equal(day.buckets, 30);
+  assert.equal(day.periodStart, Date.UTC(2026, 7, 20) / 1000, "today plus the 29 days before");
+  assert.equal(day.periodStart - day.previousStart, 30 * DAY, "the previous period has as many days");
+  assert.equal(bucketRange(day.periodStart, now, "day").length, 30, "no extra partial bucket at the start");
+
+  const hours = windowFor(1, now);
+  assert.equal(hours.bucket, "hour");
+  assert.equal(hours.buckets, 24);
+  assert.equal(bucketRange(hours.periodStart, now, "hour").length, 24);
+
+  const weeks = windowFor(90, now);
+  assert.equal(weeks.bucket, "day", "up to 120 days stays daily");
+  const year = windowFor(365, now);
+  assert.equal(year.bucket, "week");
+  assert.equal(year.buckets, 52);
+  assert.equal(bucketRange(year.periodStart, now, "week").length, 52);
+  assert.equal(year.periodStart, bucketStart(year.periodStart, "week"), "weeks start on a Monday");
 });
 
 test("bucketRange covers both ends", () => {
@@ -81,11 +99,13 @@ test("histogram bins account for every value, integers get whole-number bins", (
 test("pearson correlation", () => {
   close(pearson([1, 2, 3, 4], [2, 4, 6, 8]), 1);
   close(pearson([1, 2, 3, 4], [8, 6, 4, 2]), -1);
-  assert.equal(pearson([1, 1, 1], [1, 2, 3]), 0, "no variance means no correlation, not NaN");
+  assert.ok(Number.isNaN(pearson([1, 1, 1], [1, 2, 3])), "no variance means the correlation is undefined, not 0");
   const m = correlationMatrix([[1, 2, 3], [3, 2, 1], [1, 2, 3]]);
   close(m[0][1], -1);
   close(m[0][2], 1);
   close(m[1][1], 1);
+  const withConstant = correlationMatrix([[1, 2, 3], [5, 5, 5]]);
+  assert.ok(Number.isNaN(withConstant[1][1]) && Number.isNaN(withConstant[0][1]), "a constant variable has no correlation, not even with itself");
 });
 
 test("normal quantiles match the known values", () => {
@@ -144,21 +164,27 @@ const def = (id: "denials" | "fleet"): DatasetDef => ({
 const now = Date.UTC(2026, 8, 18, 12) / 1000;
 const day = (n: number) => Math.floor(now / DAY) * DAY - n * DAY;
 const row = (t: number | null, tclass: string, agent: string, v: number, w = v): Row => ({ t, dims: { tclass, agent }, value: v, weight: w });
+const longAgo = now - 400 * DAY; // a history that covers everything asked below
+
+function build(over: Partial<Parameters<typeof buildChartInput>[0]> & { days?: number }) {
+  const days = over.days ?? 7;
+  return buildChartInput({
+    def: def("denials"), measure: countMeasure, dim: "tclass", dim2: "agent", dim3: "agent", days, win: windowFor(days, now),
+    timeRows: [], treeRows: [], varRows: [], nowSec: now, sinceSec: longAgo, truncated: false, ...over,
+  });
+}
 
 test("buildChartInput: categories, zero-filled time series, previous period, matrix", () => {
   const timeRows = [
     row(day(0), "file", "a1", 5),
     row(day(0), "dir", "a1", 1),
     row(day(2), "file", "a2", 3),
-    row(day(9), "file", "a1", 4), // previous window (days = 7)
+    row(day(9), "file", "a1", 4), // previous window (7 days, so days 7..13 back)
   ];
-  const input = buildChartInput({
-    def: def("denials"), measure: countMeasure, dim: "tclass", dim2: "agent", dim3: "agent", days: 7, bucket: "day",
-    timeRows, treeRows: [row(null, "file", "a1", 8), row(null, "dir", "a1", 1)], varRows: [], nowSec: now, truncated: false,
-  });
+  const input = build({ timeRows, treeRows: [row(null, "file", "a1", 8), row(null, "dir", "a1", 1)] });
   assert.equal(input.empty, false);
   assert.deepEqual(input.categories.map((c) => [c.name, c.value]), [["file", 8], ["dir", 1]]);
-  assert.equal(input.time.total.length, 8, "an entry per day of the period, gaps included");
+  assert.equal(input.time.total.length, 7, "one entry per day of the period, gaps included");
   assert.equal(input.time.total[input.time.total.length - 1], 6);
   assert.equal(input.time.total.reduce((a, b) => a + b, 0), 9, "totals add up to the period's events");
   assert.equal(input.kpi.value, 9);
@@ -166,39 +192,39 @@ test("buildChartInput: categories, zero-filled time series, previous period, mat
   assert.equal(input.kpi.previousByCategory.file, 4);
   assert.deepEqual(input.matrix.rows, ["file", "dir"]);
   assert.deepEqual(input.matrix.cols.sort(), ["a1", "a2"]);
-  const fileRow = input.matrix.values[input.matrix.rows.indexOf("file")];
-  assert.equal(fileRow.reduce((a, b) => a + b, 0), 8);
+  assert.equal(input.matrix.weights.flat().reduce((a, b) => a + b, 0), 9, "the matrix holds every event");
   assert.equal(input.hierarchy[0].name, "file");
   assert.equal(input.hierarchy[0].value, 8);
 });
 
-test("buildChartInput: no previous data means no comparison, not a zero", () => {
-  const input = buildChartInput({
-    def: def("denials"), measure: countMeasure, dim: "tclass", dim2: "agent", dim3: "agent", days: 7, bucket: "day",
-    timeRows: [row(day(1), "file", "a1", 2)], treeRows: [], varRows: [], nowSec: now, truncated: false,
-  });
-  assert.equal(input.kpi.previous, null);
-  assert.equal(input.kpi.target, input.kpi.value);
+test("buildChartInput: a comparison needs a history that covers the previous period", () => {
+  const rows = [row(day(1), "file", "a1", 2)];
+  // no previous rows but the history reaches back: the previous period really was zero
+  assert.equal(build({ timeRows: rows }).kpi.previous, 0);
+  assert.equal(build({ timeRows: rows }).kpi.targetSource, "previous");
+  // the history starts inside the previous period: a "+100 %" would be fiction
+  const partial = build({ timeRows: rows, sinceSec: day(10) });
+  assert.equal(partial.kpi.previous, null);
+  assert.equal(partial.kpi.targetSource, "none");
+  // unknown start (status unreadable): no comparison either
+  assert.equal(build({ timeRows: rows, sinceSec: null }).kpi.previous, null);
+  // a year cannot be compared with the year before: the server keeps 366 days
+  assert.equal(build({ timeRows: rows, days: 365 }).kpi.previous, null);
 });
 
 test("buildChartInput: averaged measures are weighted by sample count and leave real gaps", () => {
   const rows = [row(day(1), "enforcing", "a", 100, 3), row(day(1), "permissive", "a", 50, 1)];
-  const input = buildChartInput({
-    def: def("fleet"), measure: scoreMeasure, dim: "tclass", dim2: "agent", dim3: "agent", days: 3, bucket: "day",
-    timeRows: rows, treeRows: [], varRows: [], nowSec: now, truncated: false,
-  });
+  const input = build({ def: def("fleet"), measure: scoreMeasure, days: 3, timeRows: rows });
   close(input.kpi.value, (100 * 3 + 50 * 1) / 4);
   assert.ok(input.time.total.some((v) => Number.isNaN(v)), "days without samples are gaps, not zeros");
   assert.ok(input.kpi.spark.every((v) => Number.isFinite(v)), "the sparkline is continuous");
+  assert.equal(input.kpi.previous, null, "an average over no samples is unknown, not 0 %");
   assert.equal(combine([], false).value, 0);
 });
 
 test("buildChartInput: the tail of many categories becomes one 'other' series", () => {
   const rows = ["a", "b", "c", "d", "e", "f", "g"].map((c, i) => row(day(0), c, "x", 10 - i));
-  const input = buildChartInput({
-    def: def("denials"), measure: countMeasure, dim: "tclass", dim2: "agent", dim3: "agent", days: 3, bucket: "day",
-    timeRows: rows, treeRows: [], varRows: [], nowSec: now, truncated: false,
-  });
+  const input = build({ days: 3, timeRows: rows });
   assert.equal(input.time.series.length, 6);
   assert.equal(input.time.series[5].name, "::other::");
   assert.equal(input.time.series[5].values[input.time.series[5].values.length - 1], 5 + 4);
@@ -206,13 +232,82 @@ test("buildChartInput: the tail of many categories becomes one 'other' series", 
 
 test("buildChartInput: variables per agent-day feed the points", () => {
   const varRows = [row(day(0), "file", "a1", 4), row(day(0), "dir", "a1", 2), row(day(1), "file", "a2", 7)];
-  const input = buildChartInput({
-    def: def("denials"), measure: countMeasure, dim: "tclass", dim2: "agent", dim3: "agent", days: 7, bucket: "day",
-    timeRows: [], treeRows: [], varRows, nowSec: now, truncated: false,
-  });
+  const input = build({ varRows });
   assert.equal(input.empty, true);
   assert.equal(input.points.length, 2);
   const a1 = input.points.find((p) => p.group === "a1")!;
   assert.deepEqual([a1.x, a1.y], [6, 2]);
   assert.equal(input.variables.rows.length, 2);
+});
+
+// The whole point of one window: every shape of the same data adds up to the
+// same total, however it is sliced.
+test("every shape of the data reconciles to the same total, even past the top-N cut-offs", () => {
+  const classes = ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10"];
+  const agents = ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"];
+  const timeRows: Row[] = [];
+  const treeRows: Row[] = [];
+  let expected = 0;
+  classes.forEach((c, i) =>
+    agents.forEach((a, j) => {
+      for (const d of [0, 1, 3, 5]) {
+        const v = 1 + ((i * 7 + j * 3 + d) % 9);
+        timeRows.push(row(day(d), c, a, v));
+        expected += v;
+      }
+    }),
+  );
+  // the tree query is the same window without a time bucket
+  const byKey = new Map<string, number>();
+  for (const r of timeRows) byKey.set(r.dims.tclass + "|" + r.dims.agent, (byKey.get(r.dims.tclass + "|" + r.dims.agent) ?? 0) + r.value);
+  for (const [k, v] of byKey) {
+    const [c, a] = k.split("|");
+    treeRows.push({ t: null, dims: { tclass: c, agent: a }, value: v, weight: v });
+  }
+  const input = build({ days: 7, timeRows, treeRows });
+  const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
+  assert.equal(input.kpi.value, expected);
+  assert.equal(sum(input.categories.map((c) => c.value)), expected, "categories");
+  assert.equal(sum(input.time.total), expected, "time series total");
+  assert.equal(sum(input.time.series.map((s) => sum(s.values))), expected, "the series (with their 'other' tail) add up too");
+  assert.equal(sum(input.matrix.weights.flat()), expected, "matrix, 10 classes x 8 agents cut to 8 x 5 plus 'other'");
+  assert.equal(sum(input.hierarchy.map((n) => n.value)), expected, "hierarchy roots");
+  for (const node of input.hierarchy) {
+    if (node.children) assert.equal(sum(node.children.map((c) => c.value)), node.value, `children of ${node.name} add up to it`);
+  }
+  assert.ok(input.matrix.rows.includes("::other::") && input.matrix.cols.includes("::other::"), "the cut-off tail is visible as 'other'");
+  assert.ok(input.matrix.rows.length <= 8 && input.matrix.cols.length <= 5);
+  // the heatmap's matrix has more room (10 rows x 8 cols): with exactly 10
+  // classes and 8 agents, nothing needs to be merged into "other"
+  assert.equal(input.heat.rows.length, 10);
+  assert.equal(input.heat.cols.length, 8);
+  assert.ok(!input.heat.rows.includes("::other::") && !input.heat.cols.includes("::other::"));
+  assert.equal(sum(input.heat.weights.flat()), expected, "heatmap matrix holds every event too");
+});
+
+test("buildChartInput: a group with no observation (weight 0) is left out, not drawn as a zero", () => {
+  const rows = [row(day(0), "enforcing", "a1", 90, 3), row(day(0), "permissive", "a2", 0, 0)];
+  const input = build({ def: def("fleet"), measure: scoreMeasure, days: 3, timeRows: rows });
+  assert.deepEqual(input.categories.map((c) => c.name), ["enforcing"], "the zero-weight group never appears");
+  assert.equal(input.samples.every((s) => s.name !== "permissive"), true);
+});
+
+test("buildChartInput: the hourly array only holds hours that actually have data", () => {
+  const hourlyRows = [row(day(0), "x", "a1", 5), row(day(1), "x", "a1", 3)];
+  const input = build({ hourlyRows });
+  assert.equal(input.hourly.length, 2);
+  assert.deepEqual(
+    input.hourly.map((h) => h.value).sort((a, b) => a - b),
+    [3, 5],
+  );
+});
+
+test("formatDuration: short, readable, and never divides by zero", () => {
+  assert.equal(formatDuration(0), "0 s");
+  assert.equal(formatDuration(42), "42 s");
+  assert.equal(formatDuration(90), "2 min");
+  assert.equal(formatDuration(3600), "1 h");
+  assert.equal(formatDuration(3900), "1 h 5 min");
+  assert.equal(formatDuration(NaN), "-");
+  assert.equal(formatDuration(-5), "-");
 });

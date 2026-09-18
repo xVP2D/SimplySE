@@ -65,6 +65,18 @@ export function ChartGallery({
             </select>
           </label>
         )}
+        <label className="field">
+          <span>{t("charts.ui.target")}</span>
+          <input
+            className="input"
+            type="number"
+            min={0}
+            style={{ width: 150 }}
+            placeholder={t("charts.ui.targetHint")}
+            value={config.target ?? ""}
+            onChange={(e) => onChange({ ...config, target: e.target.value === "" ? undefined : Math.max(0, Number(e.target.value)) })}
+          />
+        </label>
         <div className="field">
           <span style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 5, color: "var(--color-neutral-400)" }}>{t("charts.ui.period")}</span>
           <div className="seg" role="radiogroup" aria-label={t("charts.ui.period")}>
