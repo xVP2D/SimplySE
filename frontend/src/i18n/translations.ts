@@ -118,6 +118,8 @@ const en: Dict = {
     hash: "Hash (sha256)",
     logsRecentDenials: "Logs / recent denials",
     noDenialsForAgent: "No denials observed for this agent.",
+    correlatedEvents: "Correlated events (±60s, external sources)",
+    noCorrelatedEvents: "No matching event found in configured sources.",
   },
   deployDialog: {
     title: "Deploy a rule",
@@ -299,6 +301,8 @@ const fr: Dict = {
     hash: "Hash (sha256)",
     logsRecentDenials: "Logs / denials récents",
     noDenialsForAgent: "Aucun denial observé pour cet agent.",
+    correlatedEvents: "Événements corrélés (±60s, sources externes)",
+    noCorrelatedEvents: "Aucun événement correspondant dans les sources configurées.",
   },
   deployDialog: {
     title: "Déployer une règle",
@@ -480,6 +484,8 @@ const es: Dict = {
     hash: "Hash (sha256)",
     logsRecentDenials: "Logs / denegaciones recientes",
     noDenialsForAgent: "No se ha observado ninguna denegación para este agente.",
+    correlatedEvents: "Eventos correlacionados (±60s, fuentes externas)",
+    noCorrelatedEvents: "No se encontró ningún evento coincidente en las fuentes configuradas.",
   },
   deployDialog: {
     title: "Desplegar una regla",

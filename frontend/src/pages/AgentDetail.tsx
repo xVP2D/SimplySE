@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, type Agent, type AvcEventHit, type Command, type SelinuxState } from "../lib/api";
+import { api, type Agent, type AvcEventHit, type Command, type CorrelatedEvent, type SelinuxState } from "../lib/api";
 import { DeployRuleDialog } from "../components/DeployRuleDialog";
 import { formatPayload, statusTagClass } from "../lib/commandFormat";
 import { randomUUID } from "../lib/uuid";
@@ -15,6 +15,9 @@ export function AgentDetail() {
   const [selinuxState, setSelinuxState] = useState<SelinuxState | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [expandedDenial, setExpandedDenial] = useState<number | null>(null);
+  const [correlateSources, setCorrelateSources] = useState<string[]>([]);
+  const [correlating, setCorrelating] = useState(false);
+  const [correlatedEvents, setCorrelatedEvents] = useState<CorrelatedEvent[] | null>(null);
   const [switchingMode, setSwitchingMode] = useState(false);
   const [switchingBoolean, setSwitchingBoolean] = useState<string | null>(null);
   const [booleanFilter, setBooleanFilter] = useState("");
@@ -46,6 +49,29 @@ export function AgentDetail() {
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    api.correlateSources().then(setCorrelateSources).catch(() => {});
+  }, []);
+
+  const toggleDenial = async (i: number, d: AvcEventHit) => {
+    if (expandedDenial === i) {
+      setExpandedDenial(null);
+      setCorrelatedEvents(null);
+      return;
+    }
+    setExpandedDenial(i);
+    setCorrelatedEvents(null);
+    if (correlateSources.length === 0) return;
+    setCorrelating(true);
+    try {
+      setCorrelatedEvents(await api.correlateAgent(d.agent_id, d.ts_unix, 60));
+    } catch {
+      setCorrelatedEvents([]);
+    } finally {
+      setCorrelating(false);
+    }
+  };
 
   const switchMode = async (mode: "enforcing" | "permissive") => {
     if (!agent || mode === agent.mode) return;
@@ -442,11 +468,7 @@ export function AgentDetail() {
           <tbody>
             {denials.map((d, i) => (
               <>
-                <tr
-                  key={i}
-                  style={{ cursor: "pointer" }}
-                  onClick={() => setExpandedDenial(expandedDenial === i ? null : i)}
-                >
+                <tr key={i} style={{ cursor: "pointer" }} onClick={() => toggleDenial(i, d)}>
                   <td style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>{new Date(d.timestamp).toLocaleTimeString(locale)}</td>
                   <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12 }}>
                     {d.scontext} → {d.tcontext}
@@ -469,9 +491,32 @@ export function AgentDetail() {
                         background: "var(--color-neutral-900, rgba(0,0,0,0.15))",
                         wordBreak: "break-all",
                         whiteSpace: "pre-wrap",
+                        padding: 8.4,
                       }}
                     >
-                      {d.raw_line}
+                      <div>{d.raw_line}</div>
+                      {correlateSources.length > 0 && (
+                        <div style={{ marginTop: 8.4, borderTop: "1px solid var(--color-divider)", paddingTop: 8.4 }}>
+                          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4.2 }}>
+                            {t("agentDetail.correlatedEvents")}
+                          </div>
+                          {correlating && <div>{t("common.loading")}</div>}
+                          {!correlating && correlatedEvents && correlatedEvents.length === 0 && (
+                            <div>{t("agentDetail.noCorrelatedEvents")}</div>
+                          )}
+                          {!correlating &&
+                            correlatedEvents?.map((e, j) => (
+                              <div key={j} style={{ display: "flex", gap: 8.4, padding: "3px 0" }}>
+                                <span className="tag tag-neutral">{e.source}</span>
+                                <span style={{ color: "var(--color-neutral-600)" }}>
+                                  {new Date(e.timestamp).toLocaleTimeString(locale)}
+                                </span>
+                                {e.severity && <span style={{ color: "var(--color-neutral-500)" }}>[{e.severity}]</span>}
+                                <span>{e.summary}</span>
+                              </div>
+                            ))}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 )}

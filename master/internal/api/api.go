@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"console-selinux/master/internal/correlate"
 	"console-selinux/master/internal/rules"
 	"console-selinux/master/internal/server"
 	"console-selinux/master/internal/store/opensearch"
@@ -52,6 +53,11 @@ type API struct {
 	// on a hard refresh. Left empty, only the API is served (e.g. local
 	// dev, where the frontend runs via its own `npm run dev` instead).
 	FrontendDist string
+
+	// Correlate holds whichever external SIEM/EDR/monitoring connectors
+	// were configured (see cmd/master's SIEM_OPENSEARCH_*/LIBRENMS_*
+	// env vars) — may be an empty, non-nil registry when none are.
+	Correlate *correlate.Registry
 }
 
 func (a *API) Routes() *http.ServeMux {
@@ -59,6 +65,8 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/agents", a.listAgents)
 	mux.HandleFunc("GET /api/agents/{id}", a.getAgent)
 	mux.HandleFunc("GET /api/agents/{id}/selinux", a.getAgentSelinux)
+	mux.HandleFunc("GET /api/agents/{id}/correlate", a.correlateAgent)
+	mux.HandleFunc("GET /api/correlate/sources", a.correlateSources)
 	mux.HandleFunc("GET /api/denials", a.listDenials)
 	mux.HandleFunc("GET /api/denials/top", a.topSignatures)
 	mux.HandleFunc("GET /api/denials/matrix", a.denialMatrix)
@@ -234,6 +242,39 @@ func (a *API) getAgentSelinux(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, state)
+}
+
+// correlateSources reports which external SIEM/EDR/monitoring connectors
+// are actually configured, so the dashboard only shows the "correlate"
+// action where it would do something.
+func (a *API) correlateSources(w http.ResponseWriter, r *http.Request) {
+	names := []string{}
+	if a.Correlate != nil {
+		names = a.Correlate.SourceNames()
+	}
+	writeJSON(w, http.StatusOK, names)
+}
+
+// correlateAgent queries every configured source live for events on this
+// agent's host around the given time — on demand, for this one host and
+// a narrow window, never a bulk/continuous fetch (see internal/correlate's
+// package doc). ?around= is a unix timestamp (default: now); ?window= is
+// the +/- seconds around it to search (default 60).
+func (a *API) correlateAgent(w http.ResponseWriter, r *http.Request) {
+	if a.Correlate == nil || !a.Correlate.HasSources() {
+		writeJSON(w, http.StatusOK, []correlate.Event{})
+		return
+	}
+	agent, err := a.Store.GetAgent(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	around := time.Unix(int64(parseNonNegativeInt(r, "around", int(time.Now().Unix()))), 0)
+	window := time.Duration(parseNonNegativeInt(r, "window", 60)) * time.Second
+
+	events := a.Correlate.QueryAll(r.Context(), agent.IP, agent.Hostname, around, window)
+	writeJSON(w, http.StatusOK, events)
 }
 
 func (a *API) listDenials(w http.ResponseWriter, r *http.Request) {

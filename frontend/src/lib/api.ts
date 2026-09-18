@@ -93,6 +93,14 @@ export interface SelinuxState {
   collected_at?: string;
 }
 
+export interface CorrelatedEvent {
+  source: string;
+  timestamp: string;
+  severity: string;
+  summary: string;
+  raw: string;
+}
+
 export interface SuggestedModule {
   id: string;
   command_id: string;
@@ -154,6 +162,9 @@ export const api = {
   listAgents: () => request<Agent[]>("/agents"),
   getAgent: (id: string) => request<{ agent: Agent; connected: boolean }>(`/agents/${id}`),
   getAgentSelinux: (id: string) => request<SelinuxState>(`/agents/${id}/selinux`),
+  correlateSources: () => request<string[]>("/correlate/sources"),
+  correlateAgent: (id: string, aroundUnix: number, windowSeconds = 60) =>
+    request<CorrelatedEvent[]>(`/agents/${id}/correlate?around=${aroundUnix}&window=${windowSeconds}`),
   listDenials: (params: { agentId?: string; query?: string; offset?: number; limit?: number } = {}) => {
     const qs = new URLSearchParams();
     if (params.agentId) qs.set("agent_id", params.agentId);

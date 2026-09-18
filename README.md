@@ -199,6 +199,52 @@ make frontend-dev       # http://localhost:5173
 - Reconnexion automatique de l'agent avec tampon disque si le master est
   injoignable.
 
+## Corrélation avec un SIEM/EDR/supervision externe (optionnel)
+
+Plutôt que de dupliquer la collecte de logs applicatifs/auth dans l'agent
+(ce qui alourdirait le stockage/l'indexation pour des données que ces
+outils collectent déjà, souvent avec une bien plus grande rétention), le
+**master** peut interroger à la demande un SIEM/EDR/outil de supervision déjà
+déployé — jamais en ingestion continue, uniquement pour la fenêtre de temps
+d'un denial précis qu'un opérateur consulte (voir `master/internal/correlate`).
+Rien de ce qui est lu n'est réécrit dans Postgres/OpenSearch : c'est une
+requête à la volée, affichée puis oubliée.
+
+Deux connecteurs, tous deux optionnels (désactivés si leurs variables
+d'environnement ne sont pas renseignées) :
+
+- **`SIEM_OPENSEARCH_URL`** (+ `SIEM_OPENSEARCH_INDEX`, `SIEM_OPENSEARCH_HOST_FIELD`,
+  `SIEM_OPENSEARCH_USER`/`_PASSWORD`, `SIEM_OPENSEARCH_INSECURE_SKIP_VERIFY`,
+  `SIEM_OPENSEARCH_NAME`) : connecteur générique compatible
+  OpenSearch/Elasticsearch. C'est ce qui permet d'atteindre **Wazuh**
+  directement (son indexeur est OpenSearch/Elasticsearch depuis la 4.x —
+  pointer `SIEM_OPENSEARCH_INDEX` sur `wazuh-alerts-*`) et tout aussi bien
+  une pile **Suricata** dont le `eve.json` est expédié vers une stack
+  ELK/OpenSearch — même code, juste un index et un nom de champ différents.
+  Mécanisme vérifié en conditions réelles contre un vrai cluster OpenSearch
+  avec un document au format Wazuh (`agent.ip`, `@timestamp`,
+  `rule.description`, `rule.level`).
+- **`LIBRENMS_URL`** + `LIBRENMS_TOKEN` : connecteur REST LibreNMS
+  (`/api/v0/alerts`, filtré côté master par hôte et fenêtre de temps).
+  Implémenté d'après l'API documentée, non testé contre une instance
+  LibreNMS réelle (aucune disponible dans cet environnement) — à valider
+  avant un usage en production.
+
+Le dashboard expose ceci sur la page détail d'un agent : chaque denial
+peut être déplié pour voir, en plus de sa ligne brute, les événements
+externes survenus dans les ±60s autour de lui (`GET
+/api/agents/{id}/correlate?around=<unix>&window=<secondes>`) — de quoi
+distinguer un vrai comportement malveillant (repéré côté SIEM/EDR au même
+moment) d'un faux positif de politique (une appli légitime qui a juste
+besoin d'un booléen SELinux). Le bouton reste caché si aucun connecteur
+n'est configuré (`GET /api/correlate/sources`).
+
+Pour ajouter un autre outil (LibreNMS mis à part, quasiment tout ce qui
+expose une recherche compatible OpenSearch/Elasticsearch passe déjà par le
+connecteur générique) : implémenter l'interface `correlate.Source`
+(`Query(ctx, ip, hostname, around, window) ([]Event, error)`) et
+l'enregistrer dans `cmd/master/main.go`.
+
 ## Simplifications connues (itérations suivantes)
 
 - **Enrôlement** : un seul certificat client mTLS partagé
