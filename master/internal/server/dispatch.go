@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 
 	selinuxv1 "console-selinux/master/internal/gen/selinuxv1"
 	"console-selinux/master/internal/rules"
@@ -73,6 +75,19 @@ func dispatch(ctx context.Context, store *postgres.Store, hub *Hub, n postgres.N
 	return cmd, nil
 }
 
+var deniedPermsRe = regexp.MustCompile(`denied\s*\{([^}]*)\}`)
+
+// PermsFromRawLine extracts the denied permissions from an AVC line
+// ("avc: denied { read write } for ..."), so a suggestion is named and
+// generated for exactly the permissions that denial was about.
+func PermsFromRawLine(rawLine string) []string {
+	m := deniedPermsRe.FindStringSubmatch(rawLine)
+	if m == nil {
+		return nil
+	}
+	return strings.Fields(m[1])
+}
+
 // RequestModuleSuggestion dispatches a suggest_module command for one
 // specific denial (identified by its raw audit line) to agentID, and
 // creates the tracking row the Suggestions page reads. This is the single
@@ -84,7 +99,7 @@ func dispatch(ctx context.Context, store *postgres.Store, hub *Hub, n postgres.N
 // Generation only: never installs anything by itself (see the proto's
 // SUGGEST_MODULE comment and the agent's action::suggest_module).
 func RequestModuleSuggestion(ctx context.Context, store *postgres.Store, hub *Hub, agentID, scontext, tcontext, tclass, rawLine string) (postgres.SuggestedModule, error) {
-	moduleName := rules.SuggestedModuleName(rules.Observation{SContext: scontext, TContext: tcontext, TClass: tclass})
+	moduleName := rules.SuggestedModuleName(rules.Observation{SContext: scontext, TContext: tcontext, TClass: tclass, Perms: PermsFromRawLine(rawLine)})
 
 	// One suggestion per (machine, module): the automatic trigger and the
 	// "fix on this machine" button both land here, and every extra click

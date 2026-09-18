@@ -171,13 +171,14 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	if err := queue.ConsumeAvcEvents(ctx, func(m natsq.AvcEventMsg) error {
-		for _, alert := range engine.Observe(rules.Observation{
+		obs := rules.Observation{
 			AgentID:  m.AgentID,
 			SContext: m.SContext,
 			TContext: m.TContext,
 			TClass:   m.TClass,
 			Perms:    m.Perms,
-		}) {
+		}
+		for _, alert := range engine.Observe(obs) {
 			if err := pg.CreateAlert(ctx, postgres.Alert{
 				Type:     alert.Type,
 				Title:    alert.Title,
@@ -190,16 +191,19 @@ func run(log *slog.Logger) error {
 			}); err != nil {
 				log.Error("create alert failed", "type", alert.Type, "error", err)
 			}
+		}
 
-			// A signature never seen before is exactly the case audit2allow
-			// assistance is for: generate a suggested module right away so
-			// an operator has something to review without waiting for it
-			// to recur (the same request an operator can also trigger by
-			// hand from a denial row — see server.RequestModuleSuggestion).
-			if alert.Type == "new_signature" {
-				if _, err := server.RequestModuleSuggestion(ctx, pg, hub, m.AgentID, m.SContext, m.TContext, m.TClass, m.RawLine); err != nil {
-					log.Error("request module suggestion failed", "agent_id", m.AgentID, "error", err)
-				}
+		// A (machine, signature, permissions) never seen before is exactly
+		// the case audit2allow assistance is for: generate a suggested
+		// module right away so an operator has something to review without
+		// waiting for it to recur — the same request an operator can also
+		// trigger by hand from a denial row (see server.RequestModuleSuggestion).
+		// Separate from the new-signature alert on purpose: a new permission
+		// on a known signature, or the same signature on another machine,
+		// needs its own suggestion but isn't a "new signature".
+		if engine.NeedsSuggestion(obs) {
+			if _, err := server.RequestModuleSuggestion(ctx, pg, hub, m.AgentID, m.SContext, m.TContext, m.TClass, m.RawLine); err != nil {
+				log.Error("request module suggestion failed", "agent_id", m.AgentID, "error", err)
 			}
 		}
 		return search.IndexAvcEvent(ctx, opensearch.AvcEvent{

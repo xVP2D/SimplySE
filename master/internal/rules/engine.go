@@ -8,6 +8,8 @@
 package rules
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -68,22 +70,53 @@ func severityFor(o Observation) string {
 // (and, on the agent side, to a shell-argument position) from a
 // signature: letters/digits/underscore only, since both audit2allow and
 // the agent's own validation of this same string reject anything else.
+//
+// The permissions are part of the name on purpose: a module generated from
+// one denial only allows *that* denial's permissions, so a later denial of
+// the same source/target/class with other permissions (say search after
+// write) needs its own module. Sharing one name would make the second
+// install replace the first and silently drop what it allowed; with the
+// permissions in the name the modules simply add up.
 func SuggestedModuleName(o Observation) string {
-	sanitize := func(ctx string) string {
+	sanitize := func(s string) string {
 		var b strings.Builder
-		for _, r := range typeFromContext(ctx) {
+		for _, r := range s {
 			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
 				b.WriteRune(r)
 			}
 		}
 		return b.String()
 	}
-	return fmt.Sprintf("suggested_%s_%s_%s", sanitize(o.SContext), sanitize(o.TContext), sanitize(o.TClass))
+	name := fmt.Sprintf("suggested_%s_%s_%s", sanitize(typeFromContext(o.SContext)), sanitize(typeFromContext(o.TContext)), sanitize(o.TClass))
+
+	perms := make([]string, 0, len(o.Perms))
+	for _, p := range o.Perms {
+		if clean := sanitize(p); clean != "" {
+			perms = append(perms, clean)
+		}
+	}
+	sort.Strings(perms)
+	if len(perms) > 0 {
+		name += "_" + strings.Join(perms, "_")
+	}
+
+	// The agent refuses module names over 64 characters: keep the readable
+	// head and make the tail a hash of the whole thing so two long names
+	// can't collide.
+	if len(name) > 64 {
+		sum := sha256.Sum256([]byte(name))
+		name = name[:55] + "_" + hex.EncodeToString(sum[:4])
+	}
+	return name
 }
 
 type Engine struct {
 	mu    sync.Mutex
 	stats map[string]*signatureStat
+
+	// suggested remembers which (agent, signature, permission set) a module
+	// suggestion was already requested for since this process started.
+	suggested map[string]struct{}
 }
 
 type signatureStat struct {
@@ -97,7 +130,7 @@ type signatureStat struct {
 }
 
 func NewEngine() *Engine {
-	return &Engine{stats: make(map[string]*signatureStat)}
+	return &Engine{stats: make(map[string]*signatureStat), suggested: make(map[string]struct{})}
 }
 
 type Observation struct {
@@ -110,6 +143,29 @@ type Observation struct {
 
 func key(o Observation) string {
 	return o.SContext + "\x00" + o.TContext + "\x00" + o.TClass
+}
+
+// NeedsSuggestion reports whether this is the first time, since the master
+// started, that this agent produced this exact (source, target, class,
+// permission set) — i.e. whether a module suggestion should be requested for
+// it. Unlike the "new signature" alert (once per signature, whatever the
+// permissions, and only for the first agent that hits it) this fires again
+// for a new permission set on a known signature and for each further agent,
+// which is what a per-permissions module needs. It is only a cheap
+// in-memory gate: the suggestion request itself dedupes against what
+// already exists, so a master restart re-asking is harmless.
+func (e *Engine) NeedsSuggestion(o Observation) bool {
+	perms := append([]string(nil), o.Perms...)
+	sort.Strings(perms)
+	k := o.AgentID + "\x00" + key(o) + "\x00" + strings.Join(perms, ",")
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, seen := e.suggested[k]; seen {
+		return false
+	}
+	e.suggested[k] = struct{}{}
+	return true
 }
 
 // Alert is a condition the engine wants surfaced to an operator. Observe
