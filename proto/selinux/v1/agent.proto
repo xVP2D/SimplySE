@@ -24,6 +24,7 @@ message AgentMessage {
     AvcEvent avc_event = 3;
     CommandAck ack = 4;
     SelinuxInventory selinux_inventory = 5;
+    DenialsChecked denials_checked = 6;
   }
 }
 
@@ -102,7 +103,41 @@ message ServerMessage {
   oneof payload {
     Command command = 1;
     HeartbeatAck heartbeat_ack = 2;
+    CheckDenials check_denials = 3;
   }
+}
+
+// "Would this denial still be denied right now?" The master asks this
+// periodically (and right after a rule is applied) about denials it still
+// shows, so that a denial disappears from the dashboard as soon as *any*
+// change — a deployed rule, an approved suggestion, or a hand edit on the
+// machine — makes the policy allow it. The agent answers from the policy
+// actually loaded in the kernel (selinuxfs "access" interface), not by
+// guessing from what was applied.
+message DenialProbe {
+  string id = 1;        // opaque to the agent, echoed back in the verdict
+  string scontext = 2;
+  string tcontext = 3;
+  string tclass = 4;
+  repeated string perms = 5;
+  // Path of the denied object, if the AVC record had one: if the file has
+  // been relabeled since (chcon/restorecon/semanage), its *current* label is
+  // what gets evaluated instead of the one in the old denial.
+  string path = 6;
+}
+
+message CheckDenials {
+  repeated DenialProbe probes = 1;
+}
+
+message DenialVerdict {
+  string id = 1;
+  bool allowed = 2;   // true = would no longer be denied
+  string detail = 3;  // why not, or what changed; for logs only
+}
+
+message DenialsChecked {
+  repeated DenialVerdict verdicts = 1;
 }
 
 message Command {

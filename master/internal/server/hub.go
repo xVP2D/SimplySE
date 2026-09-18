@@ -42,9 +42,13 @@ func (h *Hub) Register(agentID string) (ch chan *selinuxv1.ServerMessage, unregi
 // Dispatch enqueues a message for delivery to agentID. It returns an error
 // if the agent has no open stream.
 func (h *Hub) Dispatch(agentID string, msg *selinuxv1.ServerMessage) error {
+	// The lock is held across the send (it is non-blocking): unregister
+	// closes the channel under the same lock, so releasing it first would
+	// let a disconnect close the channel between the lookup and the send —
+	// "send on closed channel", which takes the whole master down.
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	ch, ok := h.agents[agentID]
-	h.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("agent %s is not connected", agentID)
 	}

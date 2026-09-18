@@ -3,6 +3,7 @@ mod buffer;
 mod collector;
 mod config;
 mod grpc;
+mod selinux_access;
 mod selinux_info;
 
 pub mod pb {

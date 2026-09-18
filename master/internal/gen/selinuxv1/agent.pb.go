@@ -109,6 +109,7 @@ type AgentMessage struct {
 	//	*AgentMessage_AvcEvent
 	//	*AgentMessage_Ack
 	//	*AgentMessage_SelinuxInventory
+	//	*AgentMessage_DenialsChecked
 	Payload       isAgentMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -196,6 +197,15 @@ func (x *AgentMessage) GetSelinuxInventory() *SelinuxInventory {
 	return nil
 }
 
+func (x *AgentMessage) GetDenialsChecked() *DenialsChecked {
+	if x != nil {
+		if x, ok := x.Payload.(*AgentMessage_DenialsChecked); ok {
+			return x.DenialsChecked
+		}
+	}
+	return nil
+}
+
 type isAgentMessage_Payload interface {
 	isAgentMessage_Payload()
 }
@@ -220,6 +230,10 @@ type AgentMessage_SelinuxInventory struct {
 	SelinuxInventory *SelinuxInventory `protobuf:"bytes,5,opt,name=selinux_inventory,json=selinuxInventory,proto3,oneof"`
 }
 
+type AgentMessage_DenialsChecked struct {
+	DenialsChecked *DenialsChecked `protobuf:"bytes,6,opt,name=denials_checked,json=denialsChecked,proto3,oneof"`
+}
+
 func (*AgentMessage_Enroll) isAgentMessage_Payload() {}
 
 func (*AgentMessage_Heartbeat) isAgentMessage_Payload() {}
@@ -229,6 +243,8 @@ func (*AgentMessage_AvcEvent) isAgentMessage_Payload() {}
 func (*AgentMessage_Ack) isAgentMessage_Payload() {}
 
 func (*AgentMessage_SelinuxInventory) isAgentMessage_Payload() {}
+
+func (*AgentMessage_DenialsChecked) isAgentMessage_Payload() {}
 
 // Sent once, as the first message on a newly opened stream.
 type EnrollInfo struct {
@@ -760,6 +776,7 @@ type ServerMessage struct {
 	//
 	//	*ServerMessage_Command
 	//	*ServerMessage_HeartbeatAck
+	//	*ServerMessage_CheckDenials
 	Payload       isServerMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -820,6 +837,15 @@ func (x *ServerMessage) GetHeartbeatAck() *HeartbeatAck {
 	return nil
 }
 
+func (x *ServerMessage) GetCheckDenials() *CheckDenials {
+	if x != nil {
+		if x, ok := x.Payload.(*ServerMessage_CheckDenials); ok {
+			return x.CheckDenials
+		}
+	}
+	return nil
+}
+
 type isServerMessage_Payload interface {
 	isServerMessage_Payload()
 }
@@ -832,9 +858,257 @@ type ServerMessage_HeartbeatAck struct {
 	HeartbeatAck *HeartbeatAck `protobuf:"bytes,2,opt,name=heartbeat_ack,json=heartbeatAck,proto3,oneof"`
 }
 
+type ServerMessage_CheckDenials struct {
+	CheckDenials *CheckDenials `protobuf:"bytes,3,opt,name=check_denials,json=checkDenials,proto3,oneof"`
+}
+
 func (*ServerMessage_Command) isServerMessage_Payload() {}
 
 func (*ServerMessage_HeartbeatAck) isServerMessage_Payload() {}
+
+func (*ServerMessage_CheckDenials) isServerMessage_Payload() {}
+
+// "Would this denial still be denied right now?" The master asks this
+// periodically (and right after a rule is applied) about denials it still
+// shows, so that a denial disappears from the dashboard as soon as *any*
+// change — a deployed rule, an approved suggestion, or a hand edit on the
+// machine — makes the policy allow it. The agent answers from the policy
+// actually loaded in the kernel (selinuxfs "access" interface), not by
+// guessing from what was applied.
+type DenialProbe struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Id       string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"` // opaque to the agent, echoed back in the verdict
+	Scontext string                 `protobuf:"bytes,2,opt,name=scontext,proto3" json:"scontext,omitempty"`
+	Tcontext string                 `protobuf:"bytes,3,opt,name=tcontext,proto3" json:"tcontext,omitempty"`
+	Tclass   string                 `protobuf:"bytes,4,opt,name=tclass,proto3" json:"tclass,omitempty"`
+	Perms    []string               `protobuf:"bytes,5,rep,name=perms,proto3" json:"perms,omitempty"`
+	// Path of the denied object, if the AVC record had one: if the file has
+	// been relabeled since (chcon/restorecon/semanage), its *current* label is
+	// what gets evaluated instead of the one in the old denial.
+	Path          string `protobuf:"bytes,6,opt,name=path,proto3" json:"path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DenialProbe) Reset() {
+	*x = DenialProbe{}
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DenialProbe) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DenialProbe) ProtoMessage() {}
+
+func (x *DenialProbe) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DenialProbe.ProtoReflect.Descriptor instead.
+func (*DenialProbe) Descriptor() ([]byte, []int) {
+	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *DenialProbe) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *DenialProbe) GetScontext() string {
+	if x != nil {
+		return x.Scontext
+	}
+	return ""
+}
+
+func (x *DenialProbe) GetTcontext() string {
+	if x != nil {
+		return x.Tcontext
+	}
+	return ""
+}
+
+func (x *DenialProbe) GetTclass() string {
+	if x != nil {
+		return x.Tclass
+	}
+	return ""
+}
+
+func (x *DenialProbe) GetPerms() []string {
+	if x != nil {
+		return x.Perms
+	}
+	return nil
+}
+
+func (x *DenialProbe) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+type CheckDenials struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Probes        []*DenialProbe         `protobuf:"bytes,1,rep,name=probes,proto3" json:"probes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckDenials) Reset() {
+	*x = CheckDenials{}
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckDenials) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckDenials) ProtoMessage() {}
+
+func (x *CheckDenials) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckDenials.ProtoReflect.Descriptor instead.
+func (*CheckDenials) Descriptor() ([]byte, []int) {
+	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *CheckDenials) GetProbes() []*DenialProbe {
+	if x != nil {
+		return x.Probes
+	}
+	return nil
+}
+
+type DenialVerdict struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Allowed       bool                   `protobuf:"varint,2,opt,name=allowed,proto3" json:"allowed,omitempty"` // true = would no longer be denied
+	Detail        string                 `protobuf:"bytes,3,opt,name=detail,proto3" json:"detail,omitempty"`    // why not, or what changed; for logs only
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DenialVerdict) Reset() {
+	*x = DenialVerdict{}
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DenialVerdict) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DenialVerdict) ProtoMessage() {}
+
+func (x *DenialVerdict) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DenialVerdict.ProtoReflect.Descriptor instead.
+func (*DenialVerdict) Descriptor() ([]byte, []int) {
+	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *DenialVerdict) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *DenialVerdict) GetAllowed() bool {
+	if x != nil {
+		return x.Allowed
+	}
+	return false
+}
+
+func (x *DenialVerdict) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+type DenialsChecked struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Verdicts      []*DenialVerdict       `protobuf:"bytes,1,rep,name=verdicts,proto3" json:"verdicts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DenialsChecked) Reset() {
+	*x = DenialsChecked{}
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DenialsChecked) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DenialsChecked) ProtoMessage() {}
+
+func (x *DenialsChecked) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DenialsChecked.ProtoReflect.Descriptor instead.
+func (*DenialsChecked) Descriptor() ([]byte, []int) {
+	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *DenialsChecked) GetVerdicts() []*DenialVerdict {
+	if x != nil {
+		return x.Verdicts
+	}
+	return nil
+}
 
 type Command struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -847,7 +1121,7 @@ type Command struct {
 
 func (x *Command) Reset() {
 	*x = Command{}
-	mi := &file_proto_selinux_v1_agent_proto_msgTypes[9]
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -859,7 +1133,7 @@ func (x *Command) String() string {
 func (*Command) ProtoMessage() {}
 
 func (x *Command) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_selinux_v1_agent_proto_msgTypes[9]
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -872,7 +1146,7 @@ func (x *Command) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Command.ProtoReflect.Descriptor instead.
 func (*Command) Descriptor() ([]byte, []int) {
-	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{9}
+	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *Command) GetCommandId() string {
@@ -905,7 +1179,7 @@ type HeartbeatAck struct {
 
 func (x *HeartbeatAck) Reset() {
 	*x = HeartbeatAck{}
-	mi := &file_proto_selinux_v1_agent_proto_msgTypes[10]
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -917,7 +1191,7 @@ func (x *HeartbeatAck) String() string {
 func (*HeartbeatAck) ProtoMessage() {}
 
 func (x *HeartbeatAck) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_selinux_v1_agent_proto_msgTypes[10]
+	mi := &file_proto_selinux_v1_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -930,7 +1204,7 @@ func (x *HeartbeatAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatAck.ProtoReflect.Descriptor instead.
 func (*HeartbeatAck) Descriptor() ([]byte, []int) {
-	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{10}
+	return file_proto_selinux_v1_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *HeartbeatAck) GetServerTsUnix() int64 {
@@ -945,13 +1219,14 @@ var File_proto_selinux_v1_agent_proto protoreflect.FileDescriptor
 const file_proto_selinux_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"\x1cproto/selinux/v1/agent.proto\x12\n" +
-	"selinux.v1\"\xb0\x02\n" +
+	"selinux.v1\"\xf7\x02\n" +
 	"\fAgentMessage\x120\n" +
 	"\x06enroll\x18\x01 \x01(\v2\x16.selinux.v1.EnrollInfoH\x00R\x06enroll\x125\n" +
 	"\theartbeat\x18\x02 \x01(\v2\x15.selinux.v1.HeartbeatH\x00R\theartbeat\x123\n" +
 	"\tavc_event\x18\x03 \x01(\v2\x14.selinux.v1.AvcEventH\x00R\bavcEvent\x12*\n" +
 	"\x03ack\x18\x04 \x01(\v2\x16.selinux.v1.CommandAckH\x00R\x03ack\x12K\n" +
-	"\x11selinux_inventory\x18\x05 \x01(\v2\x1c.selinux.v1.SelinuxInventoryH\x00R\x10selinuxInventoryB\t\n" +
+	"\x11selinux_inventory\x18\x05 \x01(\v2\x1c.selinux.v1.SelinuxInventoryH\x00R\x10selinuxInventory\x12E\n" +
+	"\x0fdenials_checked\x18\x06 \x01(\v2\x1a.selinux.v1.DenialsCheckedH\x00R\x0edenialsCheckedB\t\n" +
 	"\apayload\"\xae\x01\n" +
 	"\n" +
 	"EnrollInfo\x12\x19\n" +
@@ -1001,11 +1276,27 @@ const file_proto_selinux_v1_agent_proto_rawDesc = "" +
 	"fileHashes\x1a=\n" +
 	"\x0fFileHashesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8c\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xcd\x01\n" +
 	"\rServerMessage\x12/\n" +
 	"\acommand\x18\x01 \x01(\v2\x13.selinux.v1.CommandH\x00R\acommand\x12?\n" +
-	"\rheartbeat_ack\x18\x02 \x01(\v2\x18.selinux.v1.HeartbeatAckH\x00R\fheartbeatAckB\t\n" +
-	"\apayload\"x\n" +
+	"\rheartbeat_ack\x18\x02 \x01(\v2\x18.selinux.v1.HeartbeatAckH\x00R\fheartbeatAck\x12?\n" +
+	"\rcheck_denials\x18\x03 \x01(\v2\x18.selinux.v1.CheckDenialsH\x00R\fcheckDenialsB\t\n" +
+	"\apayload\"\x97\x01\n" +
+	"\vDenialProbe\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
+	"\bscontext\x18\x02 \x01(\tR\bscontext\x12\x1a\n" +
+	"\btcontext\x18\x03 \x01(\tR\btcontext\x12\x16\n" +
+	"\x06tclass\x18\x04 \x01(\tR\x06tclass\x12\x14\n" +
+	"\x05perms\x18\x05 \x03(\tR\x05perms\x12\x12\n" +
+	"\x04path\x18\x06 \x01(\tR\x04path\"?\n" +
+	"\fCheckDenials\x12/\n" +
+	"\x06probes\x18\x01 \x03(\v2\x17.selinux.v1.DenialProbeR\x06probes\"Q\n" +
+	"\rDenialVerdict\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
+	"\aallowed\x18\x02 \x01(\bR\aallowed\x12\x16\n" +
+	"\x06detail\x18\x03 \x01(\tR\x06detail\"G\n" +
+	"\x0eDenialsChecked\x125\n" +
+	"\bverdicts\x18\x01 \x03(\v2\x19.selinux.v1.DenialVerdictR\bverdicts\"x\n" +
 	"\aCommand\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12+\n" +
@@ -1038,7 +1329,7 @@ func file_proto_selinux_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_selinux_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_proto_selinux_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_proto_selinux_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_proto_selinux_v1_agent_proto_goTypes = []any{
 	(CommandType)(0),         // 0: selinux.v1.CommandType
 	(*AgentMessage)(nil),     // 1: selinux.v1.AgentMessage
@@ -1050,9 +1341,13 @@ var file_proto_selinux_v1_agent_proto_goTypes = []any{
 	(*SelinuxModule)(nil),    // 7: selinux.v1.SelinuxModule
 	(*SelinuxInventory)(nil), // 8: selinux.v1.SelinuxInventory
 	(*ServerMessage)(nil),    // 9: selinux.v1.ServerMessage
-	(*Command)(nil),          // 10: selinux.v1.Command
-	(*HeartbeatAck)(nil),     // 11: selinux.v1.HeartbeatAck
-	nil,                      // 12: selinux.v1.SelinuxInventory.FileHashesEntry
+	(*DenialProbe)(nil),      // 10: selinux.v1.DenialProbe
+	(*CheckDenials)(nil),     // 11: selinux.v1.CheckDenials
+	(*DenialVerdict)(nil),    // 12: selinux.v1.DenialVerdict
+	(*DenialsChecked)(nil),   // 13: selinux.v1.DenialsChecked
+	(*Command)(nil),          // 14: selinux.v1.Command
+	(*HeartbeatAck)(nil),     // 15: selinux.v1.HeartbeatAck
+	nil,                      // 16: selinux.v1.SelinuxInventory.FileHashesEntry
 }
 var file_proto_selinux_v1_agent_proto_depIdxs = []int32{
 	2,  // 0: selinux.v1.AgentMessage.enroll:type_name -> selinux.v1.EnrollInfo
@@ -1060,19 +1355,23 @@ var file_proto_selinux_v1_agent_proto_depIdxs = []int32{
 	4,  // 2: selinux.v1.AgentMessage.avc_event:type_name -> selinux.v1.AvcEvent
 	5,  // 3: selinux.v1.AgentMessage.ack:type_name -> selinux.v1.CommandAck
 	8,  // 4: selinux.v1.AgentMessage.selinux_inventory:type_name -> selinux.v1.SelinuxInventory
-	6,  // 5: selinux.v1.SelinuxInventory.booleans:type_name -> selinux.v1.SelinuxBoolean
-	7,  // 6: selinux.v1.SelinuxInventory.modules:type_name -> selinux.v1.SelinuxModule
-	12, // 7: selinux.v1.SelinuxInventory.file_hashes:type_name -> selinux.v1.SelinuxInventory.FileHashesEntry
-	10, // 8: selinux.v1.ServerMessage.command:type_name -> selinux.v1.Command
-	11, // 9: selinux.v1.ServerMessage.heartbeat_ack:type_name -> selinux.v1.HeartbeatAck
-	0,  // 10: selinux.v1.Command.type:type_name -> selinux.v1.CommandType
-	1,  // 11: selinux.v1.AgentLink.Session:input_type -> selinux.v1.AgentMessage
-	9,  // 12: selinux.v1.AgentLink.Session:output_type -> selinux.v1.ServerMessage
-	12, // [12:13] is the sub-list for method output_type
-	11, // [11:12] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	13, // 5: selinux.v1.AgentMessage.denials_checked:type_name -> selinux.v1.DenialsChecked
+	6,  // 6: selinux.v1.SelinuxInventory.booleans:type_name -> selinux.v1.SelinuxBoolean
+	7,  // 7: selinux.v1.SelinuxInventory.modules:type_name -> selinux.v1.SelinuxModule
+	16, // 8: selinux.v1.SelinuxInventory.file_hashes:type_name -> selinux.v1.SelinuxInventory.FileHashesEntry
+	14, // 9: selinux.v1.ServerMessage.command:type_name -> selinux.v1.Command
+	15, // 10: selinux.v1.ServerMessage.heartbeat_ack:type_name -> selinux.v1.HeartbeatAck
+	11, // 11: selinux.v1.ServerMessage.check_denials:type_name -> selinux.v1.CheckDenials
+	10, // 12: selinux.v1.CheckDenials.probes:type_name -> selinux.v1.DenialProbe
+	12, // 13: selinux.v1.DenialsChecked.verdicts:type_name -> selinux.v1.DenialVerdict
+	0,  // 14: selinux.v1.Command.type:type_name -> selinux.v1.CommandType
+	1,  // 15: selinux.v1.AgentLink.Session:input_type -> selinux.v1.AgentMessage
+	9,  // 16: selinux.v1.AgentLink.Session:output_type -> selinux.v1.ServerMessage
+	16, // [16:17] is the sub-list for method output_type
+	15, // [15:16] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_proto_selinux_v1_agent_proto_init() }
@@ -1086,10 +1385,12 @@ func file_proto_selinux_v1_agent_proto_init() {
 		(*AgentMessage_AvcEvent)(nil),
 		(*AgentMessage_Ack)(nil),
 		(*AgentMessage_SelinuxInventory)(nil),
+		(*AgentMessage_DenialsChecked)(nil),
 	}
 	file_proto_selinux_v1_agent_proto_msgTypes[8].OneofWrappers = []any{
 		(*ServerMessage_Command)(nil),
 		(*ServerMessage_HeartbeatAck)(nil),
+		(*ServerMessage_CheckDenials)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1097,7 +1398,7 @@ func file_proto_selinux_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_selinux_v1_agent_proto_rawDesc), len(file_proto_selinux_v1_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   12,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -84,9 +85,24 @@ type AvcEvent struct {
 	Path     string   `json:"path"`
 	PID      string   `json:"pid"`
 	RawLine  string   `json:"raw_line"`
+	// Sig identifies "the same denial" for resolution purposes: source,
+	// target, class, the exact permission set and the path (see Signature).
+	// Set when indexing; never sent to the dashboard.
+	Sig string `json:"sig,omitempty"`
+}
+
+// Signature is the identity under which identical denials are grouped when
+// checking with an agent whether they would still be denied — permissions
+// as a sorted set and the path included, because both change the answer
+// (a relabeled file, a different permission).
+func Signature(e AvcEvent) string {
+	perms := append([]string(nil), e.Perms...)
+	sort.Strings(perms)
+	return strings.Join([]string{e.SContext, e.TContext, e.TClass, strings.Join(perms, ","), e.Path}, "|")
 }
 
 func (s *Store) IndexAvcEvent(ctx context.Context, e AvcEvent) error {
+	e.Sig = Signature(e)
 	body, err := json.Marshal(e)
 	if err != nil {
 		return fmt.Errorf("marshal avc event: %w", err)
@@ -134,6 +150,14 @@ type SearchOptions struct {
 // no mapping or migration is needed for existing data.
 const quarantinedField = "quarantined"
 
+// resolvedField is set to true on every event of a denial that the agent
+// has confirmed would no longer be denied (a rule now allows it, however it
+// got there). Hidden from every search/aggregation exactly like quarantined
+// events, so the denial and its occurrence counts simply disappear; if the
+// rule is removed later and the access is denied again, that produces brand
+// new events, which show up normally.
+const resolvedField = "resolved"
+
 type SearchResult struct {
 	Events []AvcEventHit `json:"events"`
 	Total  int           `json:"total"`
@@ -161,11 +185,13 @@ func (s *Store) Search(ctx context.Context, opts SearchOptions) (SearchResult, e
 	}
 
 	quarantinedTerm := map[string]any{"term": map[string]any{quarantinedField: true}}
+	resolvedTerm := map[string]any{"term": map[string]any{resolvedField: true}}
 	boolClause := map[string]any{}
 	if opts.Quarantined {
 		filters = append(filters, quarantinedTerm)
+		boolClause["must_not"] = []map[string]any{resolvedTerm}
 	} else {
-		boolClause["must_not"] = []map[string]any{quarantinedTerm}
+		boolClause["must_not"] = []map[string]any{quarantinedTerm, resolvedTerm}
 	}
 	boolClause["filter"] = filters
 	boolQuery := map[string]any{"bool": boolClause}
@@ -300,10 +326,14 @@ func (s *Store) DeleteEvent(ctx context.Context, index, id string) error {
 // their own concrete shape for it. Treats a missing index (no AVC events
 // indexed yet) as "no results" rather than an error, same as Search.
 func (s *Store) runAggregation(ctx context.Context, body map[string]any, out any) error {
-	// Quarantined denials are hidden from analytics too, not just the list.
+	// Quarantined and resolved denials are hidden from analytics too, not
+	// just the list.
 	body["query"] = map[string]any{"bool": map[string]any{
-		"must":     []any{body["query"]},
-		"must_not": []map[string]any{{"term": map[string]any{quarantinedField: true}}},
+		"must": []any{body["query"]},
+		"must_not": []map[string]any{
+			{"term": map[string]any{quarantinedField: true}},
+			{"term": map[string]any{resolvedField: true}},
+		},
 	}}
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -349,6 +379,17 @@ type MatrixRow struct {
 type MatrixOptions struct {
 	SinceUnix int64 // 0 means no time filter (all history)
 	Limit     int   // 0 means the default below
+	// ByCount orders by raw occurrence count instead of by how many
+	// distinct agents hit the signature (the dashboard's "most frequent
+	// signatures" wants the former).
+	ByCount bool
+}
+
+func matrixOrder(byCount bool) map[string]any {
+	if byCount {
+		return map[string]any{"_count": "desc"}
+	}
+	return map[string]any{"agent_count": "desc"}
 }
 
 // Matrix aggregates AVC events into MatrixRows, ordered by how many
@@ -377,7 +418,7 @@ func (s *Store) Matrix(ctx context.Context, opts MatrixOptions) ([]MatrixRow, er
 						{"field": "tclass.keyword"},
 					},
 					"size":  limit,
-					"order": map[string]any{"agent_count": "desc"},
+					"order": matrixOrder(opts.ByCount),
 				},
 				"aggs": map[string]any{
 					"agent_count": map[string]any{"cardinality": map[string]any{"field": "agent_id.keyword"}},
@@ -589,9 +630,20 @@ func (s *Store) EnsureRetentionPolicy(ctx context.Context, retentionDays int) er
 				// Single-node cluster (see docker-compose.yml): a replica
 				// here would just sit permanently unassigned and keep
 				// cluster health stuck at yellow.
-				"number_of_shards":                         1,
-				"number_of_replicas":                       0,
-				"plugins.index_state_management.policy_id": retentionPolicyID,
+				"number_of_shards":   1,
+				"number_of_replicas": 0,
+			},
+			// Only the fields this package writes/filters on itself; every
+			// other field keeps OpenSearch's default dynamic mapping (which
+			// the .keyword lookups elsewhere depend on). sig must be a
+			// keyword: it is aggregated on and matched exactly.
+			"mappings": map[string]any{
+				"properties": map[string]any{
+					"sig":         map[string]any{"type": "keyword", "ignore_above": 2048},
+					"quarantined": map[string]any{"type": "boolean"},
+					"resolved":    map[string]any{"type": "boolean"},
+					"resolved_at": map[string]any{"type": "long"},
+				},
 			},
 		},
 	}

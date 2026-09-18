@@ -241,11 +241,17 @@ func run(log *slog.Logger) error {
 			PermitWithoutStream: true,
 		}),
 	)
+	// Hides denials the moment the policy on their machine would allow them
+	// (see server.DenialChecker) — 30s covers changes made by hand on a
+	// machine; rules applied from here are checked immediately on their ack.
+	checker := &server.DenialChecker{Search: search, Hub: hub, Log: log}
+	go checker.Run(ctx, 30*time.Second)
 	selinuxv1.RegisterAgentLinkServer(grpcServer, &server.AgentLinkServer{
-		Store: pg,
-		Queue: queue,
-		Hub:   hub,
-		Log:   log,
+		Store:   pg,
+		Queue:   queue,
+		Hub:     hub,
+		Log:     log,
+		Checker: checker,
 	})
 
 	grpcLis, err := net.Listen("tcp", cfg.GRPCAddr)

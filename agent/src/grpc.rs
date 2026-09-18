@@ -159,6 +159,28 @@ async fn handle_server_message(
             }
         }
         pb::server_message::Payload::HeartbeatAck(_) => {}
+        pb::server_message::Payload::CheckDenials(check) => {
+            // Reads a few selinuxfs files per probe — quick, but blocking
+            // file I/O, so keep it off the async runtime's threads.
+            let verdicts = tokio::task::spawn_blocking(move || {
+                check
+                    .probes
+                    .iter()
+                    .map(crate::selinux_access::evaluate)
+                    .collect::<Vec<_>>()
+            })
+            .await
+            .unwrap_or_default();
+            let resolved = verdicts.iter().filter(|v| v.allowed).count();
+            tracing::debug!(probes = verdicts.len(), resolved, "checked denials");
+            let _ = out_tx
+                .send(pb::AgentMessage {
+                    payload: Some(pb::agent_message::Payload::DenialsChecked(
+                        pb::DenialsChecked { verdicts },
+                    )),
+                })
+                .await;
+        }
     }
 }
 

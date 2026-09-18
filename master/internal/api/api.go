@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -346,9 +347,29 @@ func (a *API) deleteDenial(w http.ResponseWriter, r *http.Request) {
 	denialStateChange(w, a.Search.DeleteEvent(r.Context(), r.PathValue("index"), r.PathValue("id")), "deleted")
 }
 
+// topSignatures backs the dashboard's "most frequent signatures": read from
+// OpenSearch like every other denial view, so quarantined and resolved
+// denials (and a master restart) are reflected — the rules engine's own
+// in-memory tally isn't.
 func (a *API) topSignatures(w http.ResponseWriter, r *http.Request) {
-	limit := parseLimit(r, 10)
-	writeJSON(w, http.StatusOK, a.Rules.TopSignatures(limit))
+	rows, err := a.Search.Matrix(r.Context(), opensearch.MatrixOptions{Limit: parseLimit(r, 10), ByCount: true})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	out := make([]rules.TopSignature, 0, len(rows))
+	for _, row := range rows {
+		perms := append([]string(nil), row.Perms...)
+		sort.Strings(perms)
+		out = append(out, rules.TopSignature{
+			Pair:   row.SContext + " -> " + row.TContext,
+			Class:  row.TClass,
+			Perms:  strings.Join(perms, ","),
+			Count:  row.Count,
+			Agents: row.AgentCount,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // denialMatrix aggregates AVC events fleet-wide by (scontext, tcontext,

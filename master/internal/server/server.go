@@ -22,6 +22,9 @@ type AgentLinkServer struct {
 	Queue *natsq.Queue
 	Hub   *Hub
 	Log   *slog.Logger
+
+	// Checker may be nil (denial resolution off).
+	Checker *DenialChecker
 }
 
 func (s *AgentLinkServer) Session(stream selinuxv1.AgentLink_SessionServer) error {
@@ -137,6 +140,12 @@ func (s *AgentLinkServer) handleIncoming(ctx context.Context, agentID string, ms
 		}
 		s.completeSuggestionIfApplicable(ctx, ack)
 		s.completeRevertIfApplicable(ctx, ack.GetCommandId(), ack.GetSuccess(), ack.GetMessage())
+		s.checkDenialsAfterRule(ctx, agentID, ack.GetCommandId(), ack.GetSuccess())
+
+	case *selinuxv1.AgentMessage_DenialsChecked:
+		if s.Checker != nil {
+			s.Checker.HandleVerdicts(ctx, agentID, p.DenialsChecked)
+		}
 
 	case *selinuxv1.AgentMessage_SelinuxInventory:
 		inv := p.SelinuxInventory
@@ -222,4 +231,18 @@ func peerAddr(ctx context.Context) string {
 		return p.Addr.String()
 	}
 	return host
+}
+
+// checkDenialsAfterRule re-checks this agent's denials right after a rule
+// that may allow something was applied successfully, so the dashboard
+// updates within a second or two instead of at the next sweep.
+func (s *AgentLinkServer) checkDenialsAfterRule(ctx context.Context, agentID, commandID string, success bool) {
+	if s.Checker == nil || !success {
+		return
+	}
+	cmd, err := s.Store.GetCommand(ctx, commandID)
+	if err != nil || !ruleTypesThatMayAllow[cmd.Type] {
+		return
+	}
+	s.Checker.Sweep(ctx, agentID)
 }
