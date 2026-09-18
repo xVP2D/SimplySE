@@ -48,7 +48,7 @@ func (s *Store) UnresolvedProbes(ctx context.Context, agentID string, perAgent i
 				"terms": map[string]any{"field": "agent_id.keyword", "size": 1000},
 				"aggs": map[string]any{
 					"sigs": map[string]any{
-						"terms": map[string]any{"field": "sig", "size": perAgent, "order": map[string]any{"latest": "desc"}},
+						"terms": map[string]any{"field": "sig.keyword", "size": perAgent, "order": map[string]any{"latest": "desc"}},
 						"aggs": map[string]any{
 							"latest": map[string]any{"max": map[string]any{"field": "ts_unix"}},
 							"sample": map[string]any{"top_hits": map[string]any{
@@ -110,7 +110,7 @@ func (s *Store) MarkResolved(ctx context.Context, agentID, sig string) (int64, e
 	body, err := json.Marshal(map[string]any{
 		"query": map[string]any{"bool": map[string]any{"filter": []map[string]any{
 			{"term": map[string]any{"agent_id.keyword": agentID}},
-			{"term": map[string]any{"sig": sig}},
+			{"term": map[string]any{"sig.keyword": sig}},
 		}}},
 		"script": map[string]any{
 			"lang":   "painless",

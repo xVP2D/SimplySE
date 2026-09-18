@@ -359,7 +359,32 @@ func (s *Store) runAggregation(ctx context.Context, body map[string]any, out any
 		}
 		return fmt.Errorf("run aggregation: opensearch returned %s", res.Status())
 	}
-	if err := json.NewDecoder(res.Body).Decode(out); err != nil {
+	raw, err := io.ReadAll(res.Body)
+	if err != nil {
+		return fmt.Errorf("read aggregation response: %w", err)
+	}
+	// OpenSearch answers 200 even when some shards failed (e.g. an
+	// aggregation on a field mapped differently in one index) and simply
+	// leaves those shards' data out — which would read as "nothing found".
+	// Fail loudly instead of returning silently incomplete numbers.
+	var shards struct {
+		Shards struct {
+			Failed   int `json:"failed"`
+			Failures []struct {
+				Reason struct {
+					Reason string `json:"reason"`
+				} `json:"reason"`
+			} `json:"failures"`
+		} `json:"_shards"`
+	}
+	if err := json.Unmarshal(raw, &shards); err == nil && shards.Shards.Failed > 0 {
+		reason := "unknown"
+		if len(shards.Shards.Failures) > 0 {
+			reason = shards.Shards.Failures[0].Reason.Reason
+		}
+		return fmt.Errorf("run aggregation: %d shard(s) failed: %s", shards.Shards.Failed, reason)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
 		return fmt.Errorf("decode aggregation response: %w", err)
 	}
 	return nil
@@ -639,11 +664,16 @@ func (s *Store) EnsureRetentionPolicy(ctx context.Context, retentionDays int) er
 			},
 			// Only the fields this package writes/filters on itself; every
 			// other field keeps OpenSearch's default dynamic mapping (which
-			// the .keyword lookups elsewhere depend on). sig must be a
-			// keyword: it is aggregated on and matched exactly.
+			// the .keyword lookups elsewhere depend on).
 			"mappings": map[string]any{
 				"properties": map[string]any{
-					"sig":         map[string]any{"type": "keyword", "ignore_above": 2048},
+					// text + keyword sub-field: the same shape dynamic mapping
+					// gives it in an index created before this template
+					// existed, so one query (sig.keyword) works on both.
+					"sig": map[string]any{
+						"type":   "text",
+						"fields": map[string]any{"keyword": map[string]any{"type": "keyword", "ignore_above": 2048}},
+					},
 					"quarantined": map[string]any{"type": "boolean"},
 					"resolved":    map[string]any{"type": "boolean"},
 					"resolved_at": map[string]any{"type": "long"},
