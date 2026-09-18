@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -40,6 +41,12 @@ type config struct {
 	PostgresDSN   string
 	OpenSearchURL string
 	NatsURL       string
+
+	// OpenSearchAVCRetentionDays: how long a avc_events-* daily index
+	// (see internal/store/opensearch) is kept before an ISM policy
+	// deletes it — the knob for "large volume" deployments where keeping
+	// every AVC event forever would eventually fill the disk.
+	OpenSearchAVCRetentionDays int
 
 	// Enrollment: lets install-agent.sh fetch the shared agent mTLS
 	// identity automatically instead of the operator scp-ing it by hand.
@@ -70,6 +77,8 @@ func loadConfig() config {
 		AgentCertFile: getenv("AGENT_CERT_FILE", "deploy/certs/agent-dev.crt"),
 		AgentKeyFile:  getenv("AGENT_KEY_FILE", "deploy/certs/agent-dev.key"),
 		FrontendDist:  getenv("FRONTEND_DIST", "frontend/dist"),
+
+		OpenSearchAVCRetentionDays: getenvInt("OPENSEARCH_AVC_RETENTION_DAYS", 30),
 	}
 }
 
@@ -78,6 +87,18 @@ func getenv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func getenvInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 func main() {
@@ -105,6 +126,16 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	log.Info("connected to opensearch")
+
+	// Idempotent: safe (and necessary) to re-apply on every boot so a
+	// changed OPENSEARCH_AVC_RETENTION_DAYS actually takes effect. Never
+	// fatal — an OpenSearch build without the ISM plugin, or one that's
+	// briefly unreachable, shouldn't block the whole master from starting.
+	if err := search.EnsureRetentionPolicy(ctx, cfg.OpenSearchAVCRetentionDays); err != nil {
+		log.Warn("opensearch avc_events retention policy not applied", "error", err)
+	} else {
+		log.Info("opensearch avc_events retention policy applied", "retention_days", cfg.OpenSearchAVCRetentionDays)
+	}
 
 	queue, err := natsq.Connect(ctx, cfg.NatsURL)
 	if err != nil {

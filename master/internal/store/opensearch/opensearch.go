@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -15,9 +17,47 @@ import (
 	opensearchapi "github.com/opensearch-project/opensearch-go/v2/opensearchapi"
 )
 
-const indexName = "avc_events"
+// legacyIndexName is the single fixed index every AVC event was written to
+// before daily rolling indices — kept in every read's index list (never
+// written to again) so history collected before that switch stays visible
+// instead of silently disappearing from Denials/Matrix/Trend.
+const legacyIndexName = "avc_events"
+
+// indexPrefix + a UTC day gives each day's events their own index (e.g.
+// avc_events-2026.09.18), matching the retention policy applied by
+// EnsureRetentionPolicy below — a fixed index has no natural unit to
+// expire, so ISM can only delete whole day-indices, not individual old
+// documents.
+const indexPrefix = "avc_events-"
+
+// retentionPolicyID/templateName back EnsureRetentionPolicy: a policy that
+// deletes a avc_events-* index once it's old enough, and a template that
+// auto-attaches that policy to every new one as it's created (no per-index
+// setup needed at write time).
+const (
+	retentionPolicyID = "avc-events-retention"
+	templateName      = "avc-events"
+)
+
+func dailyIndexName(t time.Time) string {
+	return indexPrefix + t.UTC().Format("2006.01.02")
+}
+
+// readIndices is every index name/pattern a query should search: the
+// legacy fixed index (historical data, no longer written to) plus every
+// daily index going forward.
+func readIndices() []string {
+	return []string{legacyIndexName, indexPrefix + "*"}
+}
+
+// ignoreUnavailableIndices is passed by address to every SearchRequest:
+// readIndices() names the legacy index unconditionally, but a fresh
+// install never creates it (only daily ones exist), so the request must
+// tolerate a missing index instead of 404ing.
+var ignoreUnavailableIndices = true
 
 type Store struct {
+	addr   string
 	client *opensearch.Client
 }
 
@@ -28,7 +68,7 @@ func Open(addr string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open opensearch client: %w", err)
 	}
-	return &Store{client: client}, nil
+	return &Store{addr: strings.TrimSuffix(addr, "/"), client: client}, nil
 }
 
 type AvcEvent struct {
@@ -50,7 +90,7 @@ func (s *Store) IndexAvcEvent(ctx context.Context, e AvcEvent) error {
 		return fmt.Errorf("marshal avc event: %w", err)
 	}
 	req := opensearchapi.IndexRequest{
-		Index: indexName,
+		Index: dailyIndexName(time.Unix(e.TsUnix, 0)),
 		Body:  bytes.NewReader(body),
 	}
 	res, err := req.Do(ctx, s.client)
@@ -122,8 +162,13 @@ func (s *Store) Search(ctx context.Context, opts SearchOptions) (SearchResult, e
 	}
 
 	req := opensearchapi.SearchRequest{
-		Index: []string{indexName},
+		Index: readIndices(),
 		Body:  bytes.NewReader(body),
+		// A fresh install has no legacy avc_events index at all (only
+		// daily ones start existing); without this, searching the fixed
+		// list [avc_events, avc_events-*] 404s outright instead of just
+		// matching whichever of the two actually exist.
+		IgnoreUnavailable: &ignoreUnavailableIndices,
 	}
 	res, err := req.Do(ctx, s.client)
 	if err != nil {
@@ -171,8 +216,9 @@ func (s *Store) runAggregation(ctx context.Context, body map[string]any, out any
 		return fmt.Errorf("marshal aggregation query: %w", err)
 	}
 	req := opensearchapi.SearchRequest{
-		Index: []string{indexName},
-		Body:  bytes.NewReader(encoded),
+		Index:             readIndices(),
+		Body:              bytes.NewReader(encoded),
+		IgnoreUnavailable: &ignoreUnavailableIndices,
 	}
 	res, err := req.Do(ctx, s.client)
 	if err != nil {
@@ -384,4 +430,152 @@ func (s *Store) Trend(ctx context.Context, opts TrendOptions) ([]TrendPoint, err
 		}
 	}
 	return points, nil
+}
+
+// EnsureRetentionPolicy makes sure every avc_events-* daily index gets
+// deleted once it's older than retentionDays, without any per-day cleanup
+// job: an Index State Management (ISM) policy does the actual deleting,
+// and an index template auto-attaches that policy to each new daily index
+// the moment IndexAvcEvent creates it (ISM picks up newly-tagged indices
+// on its own periodic sweep, every few minutes by default — nothing here
+// needs to poll or schedule that itself).
+//
+// Idempotent and safe to call on every master startup: the template PUT
+// always replaces cleanly, and the policy PUT (which OpenSearch protects
+// with optimistic-concurrency versioning) falls back to a GET-then-PUT
+// cycle so a changed retentionDays value takes effect on restart instead
+// of being silently ignored after the first boot.
+func (s *Store) EnsureRetentionPolicy(ctx context.Context, retentionDays int) error {
+	if retentionDays <= 0 {
+		return fmt.Errorf("retention days must be positive, got %d", retentionDays)
+	}
+
+	policy := map[string]any{
+		"policy": map[string]any{
+			"description":   "Delete avc_events-* daily indices once they exceed the configured retention window.",
+			"default_state": "hot",
+			"states": []map[string]any{
+				{
+					"name":    "hot",
+					"actions": []any{},
+					"transitions": []map[string]any{
+						{
+							"state_name": "delete",
+							"conditions": map[string]any{"min_index_age": fmt.Sprintf("%dd", retentionDays)},
+						},
+					},
+				},
+				{
+					"name":        "delete",
+					"actions":     []map[string]any{{"delete": map[string]any{}}},
+					"transitions": []any{},
+				},
+			},
+		},
+	}
+	if err := s.putISMPolicy(ctx, policy); err != nil {
+		return fmt.Errorf("apply ism policy: %w", err)
+	}
+
+	template := map[string]any{
+		"index_patterns": []string{indexPrefix + "*"},
+		"template": map[string]any{
+			"settings": map[string]any{
+				// Single-node cluster (see docker-compose.yml): a replica
+				// here would just sit permanently unassigned and keep
+				// cluster health stuck at yellow.
+				"number_of_shards":                         1,
+				"number_of_replicas":                       0,
+				"plugins.index_state_management.policy_id": retentionPolicyID,
+			},
+		},
+	}
+	if err := s.putJSON(ctx, "/_index_template/"+templateName, template, nil); err != nil {
+		return fmt.Errorf("apply index template: %w", err)
+	}
+	return nil
+}
+
+// putISMPolicy PUTs the retention policy, retrying once with the current
+// document's seq_no/primary_term on a version conflict (i.e. the policy
+// already exists from a previous boot and this one changed retentionDays).
+func (s *Store) putISMPolicy(ctx context.Context, policy map[string]any) error {
+	path := "/_plugins/_ism/policies/" + retentionPolicyID
+	err := s.putJSON(ctx, path, policy, nil)
+	if err == nil {
+		return nil
+	}
+	conflict, ok := err.(*httpStatusError)
+	if !ok || conflict.status != http.StatusConflict {
+		return err
+	}
+
+	var existing struct {
+		SeqNo       int64 `json:"_seq_no"`
+		PrimaryTerm int64 `json:"_primary_term"`
+	}
+	if getErr := s.getJSON(ctx, path, &existing); getErr != nil {
+		return fmt.Errorf("re-fetch existing policy after conflict: %w", getErr)
+	}
+	query := map[string]string{
+		"if_seq_no":       fmt.Sprintf("%d", existing.SeqNo),
+		"if_primary_term": fmt.Sprintf("%d", existing.PrimaryTerm),
+	}
+	return s.putJSON(ctx, path, policy, query)
+}
+
+type httpStatusError struct {
+	status int
+	body   string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("opensearch returned %d: %s", e.status, e.body)
+}
+
+func (s *Store) putJSON(ctx context.Context, path string, body map[string]any, query map[string]string) error {
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal request body: %w", err)
+	}
+	url := s.addr + path
+	if len(query) > 0 {
+		q := make([]string, 0, len(query))
+		for k, v := range query {
+			q = append(q, k+"="+v)
+		}
+		url += "?" + strings.Join(q, "&")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(encoded))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+		return &httpStatusError{status: res.StatusCode, body: strings.TrimSpace(string(respBody))}
+	}
+	return nil
+}
+
+func (s *Store) getJSON(ctx context.Context, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.addr+path, nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+		return &httpStatusError{status: res.StatusCode, body: strings.TrimSpace(string(respBody))}
+	}
+	return json.NewDecoder(res.Body).Decode(out)
 }

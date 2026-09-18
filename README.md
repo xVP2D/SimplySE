@@ -251,6 +251,44 @@ connecteur générique) : implémenter l'interface `correlate.Source`
 (`Query(ctx, ip, hostname, around, window) ([]Event, error)`) et
 l'enregistrer dans `cmd/master/main.go`.
 
+## Volumétrie : dimensionner pour un gros volume de denials
+
+Le composant qui détermine la capacité réelle du système, c'est
+**OpenSearch** (où vivent les événements AVC bruts) — le master, Postgres et
+NATS restent légers quel que soit la taille de la flotte.
+
+- **Mémoire (heap JVM)** : `OPENSEARCH_JAVA_OPTS` dans
+  `deploy/docker-compose.yml` prend désormais `OPENSEARCH_HEAP_SIZE`
+  (défaut `1536m`, dimensionné pour une petite VM de lab). Règle de
+  dimensionnement d'OpenSearch : heap ≈ 50 % de la RAM du nœud, plafonné à
+  ~32 Go (au-delà, la JVM perd le bénéfice des "compressed oops" et plus de
+  heap devient contre-productif). Sur un nœud dédié à un gros volume,
+  augmenter cette variable plutôt que modifier le fichier.
+- **Rétention automatique** : les événements AVC sont désormais indexés
+  dans un index quotidien (`avc_events-YYYY.MM.dd`, voir
+  `internal/store/opensearch`) plutôt qu'un unique index qui grossissait
+  indéfiniment. Au démarrage, le master applique automatiquement (de façon
+  idempotente, à chaque redémarrage) une politique ISM
+  (`avc-events-retention`) qui supprime chaque index quotidien une fois
+  qu'il dépasse `OPENSEARCH_AVC_RETENTION_DAYS` jours (défaut **30**) — plus
+  besoin de purge manuelle ni de job de nettoyage externe. Les anciennes
+  données déjà présentes dans l'index fixe historique `avc_events` restent
+  lisibles (Denials/Matrice/Trend interrogent les deux), mais cet index
+  n'est plus jamais écrit et n'est pas concerné par la politique de
+  rétention (à purger manuellement si besoin).
+- **Disque** : prévoir large — l'indexation est intensive en écritures
+  aléatoires, du SSD/NVMe est recommandé dès que le volume de denials
+  monte. Le besoin dépend directement de
+  `volume quotidien de denials × OPENSEARCH_AVC_RETENTION_DAYS`.
+- **Nœud unique vs cluster** : `discovery.type: single-node` reste adapté
+  tant qu'un seul nœud suffit en CPU/IO. Le template d'index créé par
+  `EnsureRetentionPolicy` fixe `number_of_replicas: 0` (une réplique sur un
+  seul nœud reste indéfiniment non assignée et bloque la santé du cluster
+  en "yellow") — à revoir en même temps qu'un vrai passage multi-nœuds.
+
+La corrélation SIEM/EDR/LibreNMS (section précédente) n'ajoute rien à ce
+budget : elle interroge à la demande, jamais en ingestion continue.
+
 ## Simplifications connues (itérations suivantes)
 
 - **Enrôlement** : un seul certificat client mTLS partagé

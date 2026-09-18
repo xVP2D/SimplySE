@@ -41,7 +41,14 @@ services:
     environment:
       discovery.type: single-node
       plugins.security.disabled: "true"
-      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+      # 1.5G is sized for this project's own small lab VM (~5.6G total RAM
+      # shared with Postgres/NATS/the master) — enough to comfortably beat
+      # the previous 512M default without starving everything else on the
+      # box. On a dedicated/bigger node handling real fleet volume, raise
+      # OPENSEARCH_HEAP_SIZE instead of editing this file: OpenSearch's own
+      # sizing rule is heap = ~50% of the node's RAM, capped at ~32G (past
+      # that the JVM loses compressed-oops and more heap stops helping).
+      OPENSEARCH_JAVA_OPTS: "-Xms${OPENSEARCH_HEAP_SIZE:-1536m} -Xmx${OPENSEARCH_HEAP_SIZE:-1536m}"
       # Required by the image's setup script even with the security plugin
       # disabled (OpenSearch >= 2.12); irrelevant to actual access control
       # here since that plugin is off. Dev-only fallback for `make
