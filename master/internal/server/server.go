@@ -66,6 +66,9 @@ func (s *AgentLinkServer) Session(stream selinuxv1.AgentLink_SessionServer) erro
 
 	outCh, unregister := s.Hub.Register(agentID)
 	defer unregister()
+	// Deliver anything queued while this agent was offline (queued on the
+	// hub's channel, sent by the loop below).
+	go FlushPendingCommands(ctx, s.Store, s.Hub, s.Log, agentID)
 	defer func() {
 		if err := s.Store.MarkOffline(context.Background(), agentID); err != nil {
 			s.Log.Error("mark agent offline failed", "agent_id", agentID, "error", err)

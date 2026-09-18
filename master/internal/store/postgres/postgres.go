@@ -242,6 +242,37 @@ func (s *Store) CreateCommandWith(ctx context.Context, n NewCommand) (Command, e
 	return c, nil
 }
 
+// PendingCommandsFor returns commands that were persisted but never reached
+// the agent (it was disconnected when they were created), oldest first, for
+// a reconnecting agent. Recent commands of any kind, plus audit2allow
+// generation (harmless, whatever its age) — but never undo commands, which
+// are interactive and expire on their own — and not old mutating commands,
+// which shouldn't suddenly run hours later; those stay visible as pending
+// where the operator can delete them.
+func (s *Store) PendingCommandsFor(ctx context.Context, agentID string, limit int) ([]Command, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+commandColumns+`
+		FROM commands c
+		WHERE c.agent_id = $1 AND c.status = 'pending' AND c.reverts_command_id IS NULL
+		  AND (c.type = 'suggest_module' OR c.created_at > now() - interval '10 minutes')
+		ORDER BY c.created_at
+		LIMIT $2
+	`, agentID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list pending commands: %w", err)
+	}
+	defer rows.Close()
+	var out []Command
+	for rows.Next() {
+		c, err := scanCommand(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan pending command: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // ExpireStaleReverts fails undo commands for originalID that have been
 // pending/sent for over two minutes with no answer (agent went away), so a
 // lost undo can be retried instead of blocking the unique in-flight guard

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 
@@ -39,6 +40,45 @@ func DispatchCommand(ctx context.Context, store *postgres.Store, hub *Hub, agent
 	return dispatch(ctx, store, hub, n)
 }
 
+func commandMessage(id string, t selinuxv1.CommandType, payloadJSON string) *selinuxv1.ServerMessage {
+	return &selinuxv1.ServerMessage{
+		Payload: &selinuxv1.ServerMessage_Command{
+			Command: &selinuxv1.Command{CommandId: id, Type: t, PayloadJson: payloadJSON},
+		},
+	}
+}
+
+// resendPending sends a command that was persisted but never delivered
+// (the agent was offline when it was created) and marks it sent.
+func resendPending(ctx context.Context, store *postgres.Store, hub *Hub, cmd postgres.Command) error {
+	protoType, ok := commandTypeByName[cmd.Type]
+	if !ok {
+		return fmt.Errorf("unknown command type %q", cmd.Type)
+	}
+	if err := hub.Dispatch(cmd.AgentID, commandMessage(cmd.ID, protoType, cmd.PayloadJSON)); err != nil {
+		return err
+	}
+	return store.MarkCommandSent(ctx, cmd.ID)
+}
+
+// FlushPendingCommands delivers what an agent missed while it was
+// disconnected. Without this a command created during even a brief
+// disconnect (a master restart, a network blip) stayed "pending" forever.
+func FlushPendingCommands(ctx context.Context, store *postgres.Store, hub *Hub, log *slog.Logger, agentID string) {
+	pending, err := store.PendingCommandsFor(ctx, agentID, 16) // the hub's per-agent queue holds 16
+	if err != nil {
+		log.Warn("list pending commands failed", "agent_id", agentID, "error", err)
+		return
+	}
+	for _, cmd := range pending {
+		if err := resendPending(ctx, store, hub, cmd); err != nil {
+			log.Warn("resend pending command failed", "agent_id", agentID, "command_id", cmd.ID, "error", err)
+			return
+		}
+		log.Info("delivered a command the agent missed while offline", "agent_id", agentID, "command_id", cmd.ID, "type", cmd.Type)
+	}
+}
+
 // dispatch persists n and sends it if the agent is connected.
 func dispatch(ctx context.Context, store *postgres.Store, hub *Hub, n postgres.NewCommand) (postgres.Command, error) {
 	protoType, ok := commandTypeByName[n.Type]
@@ -51,15 +91,7 @@ func dispatch(ctx context.Context, store *postgres.Store, hub *Hub, n postgres.N
 		return postgres.Command{}, err
 	}
 
-	msg := &selinuxv1.ServerMessage{
-		Payload: &selinuxv1.ServerMessage_Command{
-			Command: &selinuxv1.Command{
-				CommandId:   cmd.ID,
-				Type:        protoType,
-				PayloadJson: n.PayloadJSON,
-			},
-		},
-	}
+	msg := commandMessage(cmd.ID, protoType, n.PayloadJSON)
 
 	if err := hub.Dispatch(n.AgentID, msg); err != nil {
 		// Not connected right now: the command stays "pending" and will
@@ -108,6 +140,14 @@ func RequestModuleSuggestion(ctx context.Context, store *postgres.Store, hub *Hu
 	if existing, found, err := store.FindOpenSuggestion(ctx, agentID, moduleName); err != nil {
 		return postgres.SuggestedModule{}, err
 	} else if found && existing.Status != "approved" {
+		// Still generating with its command never delivered (agent was
+		// offline): give it another chance now instead of leaving the
+		// suggestion "generating" forever.
+		if existing.Status == "generating" {
+			if cmd, err := store.GetCommand(ctx, existing.CommandID); err == nil && cmd.Status == "pending" {
+				_ = resendPending(ctx, store, hub, cmd)
+			}
+		}
 		return existing, nil
 	} else if found {
 		// Approved: only reusable while the module is actually still there
