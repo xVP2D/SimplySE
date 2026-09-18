@@ -658,11 +658,21 @@ func (x *SelinuxModule) GetVersion() string {
 // the master rather than appending, since only the current state matters
 // (there's no need to keep history of every booleans/modules snapshot).
 type SelinuxInventory struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	TsUnix        int64                  `protobuf:"varint,2,opt,name=ts_unix,json=tsUnix,proto3" json:"ts_unix,omitempty"`
-	Booleans      []*SelinuxBoolean      `protobuf:"bytes,3,rep,name=booleans,proto3" json:"booleans,omitempty"`
-	Modules       []*SelinuxModule       `protobuf:"bytes,4,rep,name=modules,proto3" json:"modules,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	AgentId  string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	TsUnix   int64                  `protobuf:"varint,2,opt,name=ts_unix,json=tsUnix,proto3" json:"ts_unix,omitempty"`
+	Booleans []*SelinuxBoolean      `protobuf:"bytes,3,rep,name=booleans,proto3" json:"booleans,omitempty"`
+	Modules  []*SelinuxModule       `protobuf:"bytes,4,rep,name=modules,proto3" json:"modules,omitempty"`
+	// sha256 (hex) of each tracked file's content, keyed by absolute path
+	// (see agent's selinux_info::TRACKED_FILES) — /etc/selinux/config and
+	// the local fcontext customizations file, not the full 6000+-entry
+	// built-in file_contexts (that only changes via policy package
+	// updates, not manual drift, and hashing all of it every collection
+	// interval buys nothing here). The master diffs this against the
+	// previous snapshot to catch a manual, untracked change (e.g. someone
+	// hand-editing /etc/selinux/config or running semanage fcontext -a
+	// outside this tool).
+	FileHashes    map[string]string `protobuf:"bytes,5,rep,name=file_hashes,json=fileHashes,proto3" json:"file_hashes,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -721,6 +731,13 @@ func (x *SelinuxInventory) GetBooleans() []*SelinuxBoolean {
 func (x *SelinuxInventory) GetModules() []*SelinuxModule {
 	if x != nil {
 		return x.Modules
+	}
+	return nil
+}
+
+func (x *SelinuxInventory) GetFileHashes() map[string]string {
+	if x != nil {
+		return x.FileHashes
 	}
 	return nil
 }
@@ -962,12 +979,17 @@ const file_proto_selinux_v1_agent_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\bR\x05value\"=\n" +
 	"\rSelinuxModule\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\"\xb3\x01\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\"\xc1\x02\n" +
 	"\x10SelinuxInventory\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x17\n" +
 	"\ats_unix\x18\x02 \x01(\x03R\x06tsUnix\x126\n" +
 	"\bbooleans\x18\x03 \x03(\v2\x1a.selinux.v1.SelinuxBooleanR\bbooleans\x123\n" +
-	"\amodules\x18\x04 \x03(\v2\x19.selinux.v1.SelinuxModuleR\amodules\"\x8c\x01\n" +
+	"\amodules\x18\x04 \x03(\v2\x19.selinux.v1.SelinuxModuleR\amodules\x12M\n" +
+	"\vfile_hashes\x18\x05 \x03(\v2,.selinux.v1.SelinuxInventory.FileHashesEntryR\n" +
+	"fileHashes\x1a=\n" +
+	"\x0fFileHashesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8c\x01\n" +
 	"\rServerMessage\x12/\n" +
 	"\acommand\x18\x01 \x01(\v2\x13.selinux.v1.CommandH\x00R\acommand\x12?\n" +
 	"\rheartbeat_ack\x18\x02 \x01(\v2\x18.selinux.v1.HeartbeatAckH\x00R\fheartbeatAckB\t\n" +
@@ -1002,7 +1024,7 @@ func file_proto_selinux_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_selinux_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_proto_selinux_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_proto_selinux_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_proto_selinux_v1_agent_proto_goTypes = []any{
 	(CommandType)(0),         // 0: selinux.v1.CommandType
 	(*AgentMessage)(nil),     // 1: selinux.v1.AgentMessage
@@ -1016,6 +1038,7 @@ var file_proto_selinux_v1_agent_proto_goTypes = []any{
 	(*ServerMessage)(nil),    // 9: selinux.v1.ServerMessage
 	(*Command)(nil),          // 10: selinux.v1.Command
 	(*HeartbeatAck)(nil),     // 11: selinux.v1.HeartbeatAck
+	nil,                      // 12: selinux.v1.SelinuxInventory.FileHashesEntry
 }
 var file_proto_selinux_v1_agent_proto_depIdxs = []int32{
 	2,  // 0: selinux.v1.AgentMessage.enroll:type_name -> selinux.v1.EnrollInfo
@@ -1025,16 +1048,17 @@ var file_proto_selinux_v1_agent_proto_depIdxs = []int32{
 	8,  // 4: selinux.v1.AgentMessage.selinux_inventory:type_name -> selinux.v1.SelinuxInventory
 	6,  // 5: selinux.v1.SelinuxInventory.booleans:type_name -> selinux.v1.SelinuxBoolean
 	7,  // 6: selinux.v1.SelinuxInventory.modules:type_name -> selinux.v1.SelinuxModule
-	10, // 7: selinux.v1.ServerMessage.command:type_name -> selinux.v1.Command
-	11, // 8: selinux.v1.ServerMessage.heartbeat_ack:type_name -> selinux.v1.HeartbeatAck
-	0,  // 9: selinux.v1.Command.type:type_name -> selinux.v1.CommandType
-	1,  // 10: selinux.v1.AgentLink.Session:input_type -> selinux.v1.AgentMessage
-	9,  // 11: selinux.v1.AgentLink.Session:output_type -> selinux.v1.ServerMessage
-	11, // [11:12] is the sub-list for method output_type
-	10, // [10:11] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	12, // 7: selinux.v1.SelinuxInventory.file_hashes:type_name -> selinux.v1.SelinuxInventory.FileHashesEntry
+	10, // 8: selinux.v1.ServerMessage.command:type_name -> selinux.v1.Command
+	11, // 9: selinux.v1.ServerMessage.heartbeat_ack:type_name -> selinux.v1.HeartbeatAck
+	0,  // 10: selinux.v1.Command.type:type_name -> selinux.v1.CommandType
+	1,  // 11: selinux.v1.AgentLink.Session:input_type -> selinux.v1.AgentMessage
+	9,  // 12: selinux.v1.AgentLink.Session:output_type -> selinux.v1.ServerMessage
+	12, // [12:13] is the sub-list for method output_type
+	11, // [11:12] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_proto_selinux_v1_agent_proto_init() }
@@ -1059,7 +1083,7 @@ func file_proto_selinux_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_selinux_v1_agent_proto_rawDesc), len(file_proto_selinux_v1_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

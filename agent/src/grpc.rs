@@ -212,7 +212,7 @@ async fn selinux_inventory_message(agent_id: &str) -> pb::AgentMessage {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let (booleans, modules) = selinux_info::collect().await;
+    let (booleans, modules, file_hashes) = selinux_info::collect().await;
     pb::AgentMessage {
         payload: Some(pb::agent_message::Payload::SelinuxInventory(
             pb::SelinuxInventory {
@@ -220,6 +220,7 @@ async fn selinux_inventory_message(agent_id: &str) -> pb::AgentMessage {
                 ts_unix,
                 booleans,
                 modules,
+                file_hashes,
             },
         )),
     }

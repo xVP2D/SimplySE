@@ -89,6 +89,7 @@ export interface SelinuxState {
   agent_id: string;
   booleans: SelinuxBoolean[];
   modules: SelinuxModule[];
+  file_hashes: Record<string, string>;
   collected_at?: string;
 }
 

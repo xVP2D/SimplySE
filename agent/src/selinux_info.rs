@@ -1,15 +1,53 @@
+use std::collections::HashMap;
+
 use tokio::process::Command;
 
 use crate::pb;
 
-/// Snapshots the local SELinux booleans and loaded policy modules by
-/// shelling out to the standard userspace tools, same approach as
-/// `action::execute` — simpler and more robust than binding
-/// libselinux/libsemanage via FFI. Never fails: a missing/failing tool
-/// just yields an empty list for that half of the snapshot (logged), so a
-/// host without SELinux tooling still connects and heartbeats normally.
-pub async fn collect() -> (Vec<pb::SelinuxBoolean>, Vec<pb::SelinuxModule>) {
-    (collect_booleans().await, collect_modules().await)
+/// Files whose content drifting (outside a `chcon`/`install_module`
+/// command this tool itself issued) is worth flagging: the master mode
+/// config, and locally-added file-context customizations. Deliberately
+/// *not* the full built-in `file_contexts` (thousands of entries that
+/// only change via policy package updates, not manual drift — hashing all
+/// of it every collection interval would cost real CPU/IO for no signal).
+const TRACKED_FILES: &[&str] = &[
+    "/etc/selinux/config",
+    "/etc/selinux/targeted/contexts/files/file_contexts.local",
+];
+
+/// Snapshots the local SELinux booleans, loaded policy modules, and a
+/// small set of security-relevant file hashes by shelling out to the
+/// standard userspace tools, same approach as `action::execute` —
+/// simpler and more robust than binding libselinux/libsemanage via FFI.
+/// Never fails: a missing/failing tool just yields an empty/partial
+/// result for that part of the snapshot (logged), so a host without
+/// SELinux tooling still connects and heartbeats normally.
+pub async fn collect() -> (Vec<pb::SelinuxBoolean>, Vec<pb::SelinuxModule>, HashMap<String, String>) {
+    (collect_booleans().await, collect_modules().await, collect_file_hashes().await)
+}
+
+async fn collect_file_hashes() -> HashMap<String, String> {
+    let mut hashes = HashMap::new();
+    for path in TRACKED_FILES {
+        // sha256sum rather than a hashing crate: consistent with this
+        // module's overall approach (shell out to standard tools), and
+        // every target distro already ships coreutils.
+        let output = match Command::new("sha256sum").arg(path).output().await {
+            Ok(output) if output.status.success() => output,
+            // Most common case: file_contexts.local simply doesn't exist
+            // yet (no local customizations were ever made) — not worth a
+            // warning, just omit it from the map.
+            Ok(_) => continue,
+            Err(err) => {
+                tracing::warn!(path, error = %err, "failed to run sha256sum");
+                continue;
+            }
+        };
+        if let Some(hash) = String::from_utf8_lossy(&output.stdout).split_whitespace().next() {
+            hashes.insert(path.to_string(), hash.to_string());
+        }
+    }
+    hashes
 }
 
 async fn collect_booleans() -> Vec<pb::SelinuxBoolean> {

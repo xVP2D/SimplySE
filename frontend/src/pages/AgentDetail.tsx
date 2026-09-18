@@ -381,6 +381,46 @@ export function AgentDetail() {
           boxShadow: "var(--shadow-sm)",
         }}
       >
+        <h5 style={{ margin: 0, fontSize: 15 }}>{t("agentDetail.trackedFiles")}</h5>
+        <p style={{ margin: 0, fontSize: 12, color: "var(--color-neutral-500)" }}>{t("agentDetail.trackedFilesExplainer")}</p>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>{t("common.columns.path")}</th>
+              <th>{t("agentDetail.hash")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(selinuxState?.file_hashes ?? {}).map(([path, hash]) => (
+              <tr key={path}>
+                <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5 }}>{path}</td>
+                <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, color: "var(--color-neutral-400)" }}>
+                  {hash.slice(0, 12)}…
+                </td>
+              </tr>
+            ))}
+            {selinuxState && Object.keys(selinuxState.file_hashes ?? {}).length === 0 && (
+              <tr>
+                <td colSpan={2} style={{ color: "var(--color-neutral-500)" }}>
+                  {t("agentDetail.noInventoryYet")}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </section>
+
+      <section
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8.4,
+          padding: 14,
+          borderRadius: 8,
+          background: "var(--color-surface)",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
           <h5 style={{ margin: 0, fontSize: 15 }}>{t("agentDetail.logsRecentDenials")}</h5>
           <Link to={`/denials?agent=${agent.id}`} className="btn btn-ghost">

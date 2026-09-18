@@ -151,9 +151,7 @@ export function Alerts() {
             }}
           >
             <i
-              className={`ph ${
-                a.type === "mode_permissive" ? "ph-shield-warning" : a.type === "threshold" ? "ph-chart-line-up" : "ph-sparkle"
-              }`}
+              className={`ph ${alertIcon(a.type)}`}
               style={{ fontSize: 18, color: "var(--color-accent)", marginTop: 2 }}
             />
             <div style={{ display: "flex", flexDirection: "column", gap: 2.8, minWidth: 0, flex: 1 }}>
@@ -198,4 +196,17 @@ export function Alerts() {
       </div>
     </div>
   );
+}
+
+function alertIcon(type: string): string {
+  switch (type) {
+    case "mode_permissive":
+      return "ph-shield-warning";
+    case "config_drift":
+      return "ph-fingerprint";
+    case "threshold":
+      return "ph-chart-line-up";
+    default:
+      return "ph-sparkle";
+  }
 }

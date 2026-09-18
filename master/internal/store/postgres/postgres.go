@@ -412,15 +412,16 @@ type SelinuxModule struct {
 }
 
 type SelinuxState struct {
-	AgentID     string           `json:"agent_id"`
-	Booleans    []SelinuxBoolean `json:"booleans"`
-	Modules     []SelinuxModule  `json:"modules"`
-	CollectedAt *time.Time       `json:"collected_at,omitempty"`
+	AgentID     string            `json:"agent_id"`
+	Booleans    []SelinuxBoolean  `json:"booleans"`
+	Modules     []SelinuxModule   `json:"modules"`
+	FileHashes  map[string]string `json:"file_hashes"`
+	CollectedAt *time.Time        `json:"collected_at,omitempty"`
 }
 
 // UpsertSelinuxState overwrites the previous snapshot for agentID — see
 // the SelinuxInventory proto comment for why this isn't append-only.
-func (s *Store) UpsertSelinuxState(ctx context.Context, agentID string, booleans []SelinuxBoolean, modules []SelinuxModule, collectedAt time.Time) error {
+func (s *Store) UpsertSelinuxState(ctx context.Context, agentID string, booleans []SelinuxBoolean, modules []SelinuxModule, fileHashes map[string]string, collectedAt time.Time) error {
 	booleansJSON, err := json.Marshal(booleans)
 	if err != nil {
 		return fmt.Errorf("marshal booleans: %w", err)
@@ -429,14 +430,19 @@ func (s *Store) UpsertSelinuxState(ctx context.Context, agentID string, booleans
 	if err != nil {
 		return fmt.Errorf("marshal modules: %w", err)
 	}
+	fileHashesJSON, err := json.Marshal(fileHashes)
+	if err != nil {
+		return fmt.Errorf("marshal file hashes: %w", err)
+	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO agent_selinux_state (agent_id, booleans_json, modules_json, collected_at)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO agent_selinux_state (agent_id, booleans_json, modules_json, file_hashes_json, collected_at)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (agent_id) DO UPDATE SET
 			booleans_json = EXCLUDED.booleans_json,
 			modules_json = EXCLUDED.modules_json,
+			file_hashes_json = EXCLUDED.file_hashes_json,
 			collected_at = EXCLUDED.collected_at
-	`, agentID, booleansJSON, modulesJSON, collectedAt)
+	`, agentID, booleansJSON, modulesJSON, fileHashesJSON, collectedAt)
 	if err != nil {
 		return fmt.Errorf("upsert selinux state: %w", err)
 	}
@@ -447,13 +453,13 @@ func (s *Store) UpsertSelinuxState(ctx context.Context, agentID string, booleans
 // agent hasn't sent an inventory snapshot yet (e.g. just enrolled, or
 // running an older agent build that predates this feature).
 func (s *Store) GetSelinuxState(ctx context.Context, agentID string) (SelinuxState, bool, error) {
-	state := SelinuxState{AgentID: agentID, Booleans: []SelinuxBoolean{}, Modules: []SelinuxModule{}}
-	var booleansJSON, modulesJSON []byte
+	state := SelinuxState{AgentID: agentID, Booleans: []SelinuxBoolean{}, Modules: []SelinuxModule{}, FileHashes: map[string]string{}}
+	var booleansJSON, modulesJSON, fileHashesJSON []byte
 	var collectedAt time.Time
 	err := s.db.QueryRowContext(ctx, `
-		SELECT booleans_json, modules_json, collected_at
+		SELECT booleans_json, modules_json, file_hashes_json, collected_at
 		FROM agent_selinux_state WHERE agent_id = $1
-	`, agentID).Scan(&booleansJSON, &modulesJSON, &collectedAt)
+	`, agentID).Scan(&booleansJSON, &modulesJSON, &fileHashesJSON, &collectedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return state, false, nil
 	}
@@ -465,6 +471,9 @@ func (s *Store) GetSelinuxState(ctx context.Context, agentID string) (SelinuxSta
 	}
 	if err := json.Unmarshal(modulesJSON, &state.Modules); err != nil {
 		return SelinuxState{}, false, fmt.Errorf("unmarshal modules: %w", err)
+	}
+	if err := json.Unmarshal(fileHashesJSON, &state.FileHashes); err != nil {
+		return SelinuxState{}, false, fmt.Errorf("unmarshal file hashes: %w", err)
 	}
 	state.CollectedAt = &collectedAt
 	return state, true, nil

@@ -90,11 +90,16 @@ CREATE INDEX IF NOT EXISTS idx_idempotency_keys_created_at ON idempotency_keys (
 -- modules). Overwritten in place on every SelinuxInventory message — this
 -- is current state, not a time series, so there's no history to keep.
 CREATE TABLE IF NOT EXISTS agent_selinux_state (
-    agent_id      TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
-    booleans_json JSONB NOT NULL DEFAULT '[]',
-    modules_json  JSONB NOT NULL DEFAULT '[]',
-    collected_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    agent_id         TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+    booleans_json    JSONB NOT NULL DEFAULT '[]',
+    modules_json     JSONB NOT NULL DEFAULT '[]',
+    -- sha256 hex per tracked path (see agent's selinux_info::TRACKED_FILES)
+    -- from the *previous* snapshot — compared against each new one to
+    -- raise a config_drift alert (see server.go) on an untracked change.
+    file_hashes_json JSONB NOT NULL DEFAULT '{}',
+    collected_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE agent_selinux_state ADD COLUMN IF NOT EXISTS file_hashes_json JSONB NOT NULL DEFAULT '{}';
 
 -- audit2allow-assisted policy suggestions: generated automatically on a
 -- new_signature alert (see main.go), *never* applied automatically — a

@@ -84,6 +84,16 @@ message SelinuxInventory {
   int64 ts_unix = 2;
   repeated SelinuxBoolean booleans = 3;
   repeated SelinuxModule modules = 4;
+  // sha256 (hex) of each tracked file's content, keyed by absolute path
+  // (see agent's selinux_info::TRACKED_FILES) — /etc/selinux/config and
+  // the local fcontext customizations file, not the full 6000+-entry
+  // built-in file_contexts (that only changes via policy package
+  // updates, not manual drift, and hashing all of it every collection
+  // interval buys nothing here). The master diffs this against the
+  // previous snapshot to catch a manual, untracked change (e.g. someone
+  // hand-editing /etc/selinux/config or running semanage fcontext -a
+  // outside this tool).
+  map<string, string> file_hashes = 5;
 }
 
 // ---- master -> agent ----

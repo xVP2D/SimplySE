@@ -147,9 +147,31 @@ func (s *AgentLinkServer) handleIncoming(ctx context.Context, agentID string, ms
 		for _, m := range inv.GetModules() {
 			modules = append(modules, postgres.SelinuxModule{Name: m.GetName(), Version: m.GetVersion()})
 		}
+		fileHashes := inv.GetFileHashes()
 		collectedAt := time.Unix(inv.GetTsUnix(), 0)
-		if err := s.Store.UpsertSelinuxState(ctx, agentID, booleans, modules, collectedAt); err != nil {
+
+		// Fetched before the overwrite so it reflects the *previous*
+		// snapshot — the only way to detect that a tracked file's content
+		// actually changed since last time, as opposed to just looking at
+		// its current hash in isolation.
+		prev, hadPrev, prevErr := s.Store.GetSelinuxState(ctx, agentID)
+		if err := s.Store.UpsertSelinuxState(ctx, agentID, booleans, modules, fileHashes, collectedAt); err != nil {
 			s.Log.Error("upsert selinux state failed", "agent_id", agentID, "error", err)
+		}
+		if prevErr == nil && hadPrev {
+			for path, newHash := range fileHashes {
+				if oldHash, ok := prev.FileHashes[path]; ok && oldHash != newHash {
+					if err := s.Store.CreateAlert(ctx, postgres.Alert{
+						Type:     "config_drift",
+						Title:    "Dérive de configuration SELinux détectée",
+						Message:  fmt.Sprintf("%s a changé sur %s en dehors d'un déploiement du master", path, agentID),
+						AgentID:  agentID,
+						Severity: "high",
+					}); err != nil {
+						s.Log.Error("create config_drift alert failed", "agent_id", agentID, "path", path, "error", err)
+					}
+				}
+			}
 		}
 
 	default:
