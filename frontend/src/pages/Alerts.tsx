@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Alert } from "../lib/api";
+import { useTranslation } from "../i18n";
 
 const PAGE_SIZE = 20;
 
 export function Alerts() {
+  const { t, locale } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const status = searchParams.get("status") ?? "open";
 
@@ -79,18 +81,18 @@ export function Alerts() {
       >
         <div className="seg">
           {[
-            { value: "open", label: "Ouvertes" },
-            { value: "acknowledged", label: "Acquittées" },
-            { value: "", label: "Toutes" },
+            { value: "open", label: t("alerts.filterOpen") },
+            { value: "acknowledged", label: t("alerts.filterAcknowledged") },
+            { value: "", label: t("alerts.filterAll") },
           ].map((opt) => (
-            <label key={opt.label} className="seg-opt" style={status === opt.value ? { color: "var(--color-accent)" } : undefined}>
+            <label key={opt.value} className="seg-opt" style={status === opt.value ? { color: "var(--color-accent)" } : undefined}>
               <input type="radio" name="status" checked={status === opt.value} onChange={() => setStatusFilter(opt.value)} />
               {opt.label}
             </label>
           ))}
         </div>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--color-neutral-500)" }}>
-          {loading ? "Chargement…" : total > 0 ? `${from}–${to} sur ${total}` : "0 résultat"}
+          {loading ? t("common.loading") : total > 0 ? t("common.resultsRange", { from, to, total }) : t("common.noResults")}
         </span>
       </div>
 
@@ -118,32 +120,37 @@ export function Alerts() {
               <span style={{ fontSize: 14 }}>{a.title}</span>
               <span style={{ fontSize: 12.5, color: "var(--color-neutral-400)" }}>{a.message}</span>
               <span style={{ fontSize: 11, color: "var(--color-neutral-600)" }}>
-                <Link to={`/agents/${a.agent_id}`}>{a.agent_id}</Link> · {new Date(a.created_at).toLocaleString()}
+                <Link to={`/agents/${a.agent_id}`}>{a.agent_id}</Link> · {new Date(a.created_at).toLocaleString(locale)}
                 {a.status === "acknowledged" && a.acknowledged_at && (
-                  <> · acquittée le {new Date(a.acknowledged_at).toLocaleString()} par {a.acknowledged_by}</>
+                  <>
+                    {t("alerts.acknowledgedMeta", {
+                      date: new Date(a.acknowledged_at).toLocaleString(locale),
+                      by: a.acknowledged_by,
+                    })}
+                  </>
                 )}
               </span>
             </div>
             {a.status === "open" ? (
               <button type="button" className="btn btn-secondary" disabled={acking === a.id} onClick={() => acknowledge(a.id)}>
-                {acking === a.id ? "…" : "Acquitter"}
+                {acking === a.id ? "…" : t("alerts.acknowledge")}
               </button>
             ) : (
-              <span className="tag tag-neutral">acquittée</span>
+              <span className="tag tag-neutral">{t("alerts.acknowledgedTag")}</span>
             )}
           </div>
         ))}
         {alerts.length === 0 && !loading && (
-          <p style={{ color: "var(--color-neutral-500)", fontSize: 13 }}>Aucune alerte ne correspond à ce filtre.</p>
+          <p style={{ color: "var(--color-neutral-500)", fontSize: 13 }}>{t("alerts.empty")}</p>
         )}
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8.4 }}>
         <button type="button" className="btn btn-secondary" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-          Précédent
+          {t("common.previous")}
         </button>
         <button type="button" className="btn btn-secondary" disabled={offset + PAGE_SIZE >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>
-          Suivant
+          {t("common.next")}
         </button>
       </div>
     </div>

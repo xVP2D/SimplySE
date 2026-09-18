@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Agent, type AvcEventHit } from "../lib/api";
+import { useTranslation } from "../i18n";
 
 const PAGE_SIZE = 25;
 
 export function Denials() {
+  const { t, locale } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const agentId = searchParams.get("agent") ?? "";
   const queryParam = searchParams.get("q") ?? "";
@@ -94,12 +96,12 @@ export function Denials() {
         <input
           className="input"
           style={{ minWidth: 220 }}
-          placeholder="Rechercher (commande, chemin, contexte…)"
+          placeholder={t("denials.searchPlaceholder")}
           value={queryInput}
           onChange={(e) => onQueryInputChange(e.target.value)}
         />
         <select className="input" style={{ width: 220 }} value={agentId} onChange={(e) => onAgentFilterChange(e.target.value)}>
-          <option value="">Tous les agents</option>
+          <option value="">{t("common.allAgents")}</option>
           {agents.map((a) => (
             <option key={a.id} value={a.id}>
               {a.hostname || a.id}
@@ -107,7 +109,7 @@ export function Denials() {
           ))}
         </select>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--color-neutral-500)" }}>
-          {loading ? "Chargement…" : total > 0 ? `${from}–${to} sur ${total}` : "0 résultat"}
+          {loading ? t("common.loading") : total > 0 ? t("common.resultsRange", { from, to, total }) : t("common.noResults")}
         </span>
       </div>
 
@@ -117,19 +119,19 @@ export function Denials() {
         <table className="table">
           <thead>
             <tr>
-              <th>Horodatage</th>
-              <th>Agent</th>
-              <th>Source → cible</th>
-              <th>Classe / perm</th>
-              <th>Commande</th>
-              <th>Chemin</th>
+              <th>{t("common.columns.timestamp")}</th>
+              <th>{t("common.columns.agent")}</th>
+              <th>{t("common.columns.sourceTarget")}</th>
+              <th>{t("common.columns.classPerm")}</th>
+              <th>{t("common.columns.command")}</th>
+              <th>{t("common.columns.path")}</th>
             </tr>
           </thead>
           <tbody>
             {events.map((d, i) => (
               <tr key={i}>
                 <td style={{ fontSize: 12, color: "var(--color-neutral-500)", whiteSpace: "nowrap" }}>
-                  {new Date(d.timestamp).toLocaleString()}
+                  {new Date(d.timestamp).toLocaleString(locale)}
                 </td>
                 <td style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>
                   <Link to={`/agents/${d.agent_id}`}>{agentsByID.get(d.agent_id)?.hostname || d.agent_id}</Link>
@@ -149,7 +151,7 @@ export function Denials() {
             {events.length === 0 && !loading && (
               <tr>
                 <td colSpan={6} style={{ color: "var(--color-neutral-500)" }}>
-                  Aucun denial ne correspond à ces filtres.
+                  {t("denials.empty")}
                 </td>
               </tr>
             )}
@@ -159,10 +161,10 @@ export function Denials() {
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8.4 }}>
         <button type="button" className="btn btn-secondary" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-          Précédent
+          {t("common.previous")}
         </button>
         <button type="button" className="btn btn-secondary" disabled={offset + PAGE_SIZE >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>
-          Suivant
+          {t("common.next")}
         </button>
       </div>
     </div>

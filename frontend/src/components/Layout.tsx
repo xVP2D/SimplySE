@@ -1,15 +1,18 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { locales, localeLabels, useTranslation, type Locale } from "../i18n";
 
 const navItems = [
-  { to: "/", icon: "ph-gauge", label: "Dashboard", end: true },
-  { to: "/agents", icon: "ph-desktop-tower", label: "Agents" },
-  { to: "/denials", icon: "ph-warning-octagon", label: "Denials" },
-  { to: "/deployments", icon: "ph-upload-simple", label: "Déploiements" },
-  { to: "/compliance", icon: "ph-shield-check", label: "Conformité" },
-  { to: "/alerts", icon: "ph-bell", label: "Alertes" },
+  { to: "/", icon: "ph-gauge", key: "nav.dashboard", end: true },
+  { to: "/agents", icon: "ph-desktop-tower", key: "nav.agents" },
+  { to: "/denials", icon: "ph-warning-octagon", key: "nav.denials" },
+  { to: "/deployments", icon: "ph-upload-simple", key: "nav.deployments" },
+  { to: "/compliance", icon: "ph-shield-check", key: "nav.compliance" },
+  { to: "/alerts", icon: "ph-bell", key: "nav.alerts" },
 ];
 
 export function Layout() {
+  const { t, locale, setLocale } = useTranslation();
+
   return (
     <div
       style={{
@@ -57,7 +60,7 @@ export function Layout() {
                 color: "var(--color-neutral-500)",
               }}
             >
-              Fleet control
+              {t("brand.subtitle")}
             </span>
           </span>
         </div>
@@ -72,10 +75,24 @@ export function Layout() {
               style={{ justifyContent: "flex-start", gap: 8.4 }}
             >
               <i className={`ph ${item.icon}`} style={{ fontSize: 16 }} />
-              <span style={{ flex: 1, textAlign: "left" }}>{item.label}</span>
+              <span style={{ flex: 1, textAlign: "left" }}>{t(item.key)}</span>
             </NavLink>
           ))}
         </nav>
+
+        <select
+          className="input"
+          style={{ marginTop: "auto" }}
+          value={locale}
+          onChange={(e) => setLocale(e.target.value as Locale)}
+          aria-label="Language"
+        >
+          {locales.map((l) => (
+            <option key={l} value={l}>
+              {localeLabels[l]}
+            </option>
+          ))}
+        </select>
       </aside>
 
       <main style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>

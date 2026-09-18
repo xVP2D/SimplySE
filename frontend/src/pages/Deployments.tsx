@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Agent, type Command } from "../lib/api";
 import { formatPayload, statusTagClass } from "../lib/commandFormat";
+import { useTranslation } from "../i18n";
 
 const PAGE_SIZE = 20;
 
 const STATUSES = ["pending", "sent", "acked", "failed"];
 
 export function Deployments() {
+  const { t, locale } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const agentId = searchParams.get("agent") ?? "";
   const status = searchParams.get("status") ?? "";
@@ -78,7 +80,7 @@ export function Deployments() {
         }}
       >
         <select className="input" style={{ width: 220 }} value={agentId} onChange={(e) => setFilter("agent", e.target.value)}>
-          <option value="">Tous les agents</option>
+          <option value="">{t("common.allAgents")}</option>
           {agents.map((a) => (
             <option key={a.id} value={a.id}>
               {a.hostname || a.id}
@@ -86,7 +88,7 @@ export function Deployments() {
           ))}
         </select>
         <select className="input" style={{ width: 160 }} value={status} onChange={(e) => setFilter("status", e.target.value)}>
-          <option value="">Tous les statuts</option>
+          <option value="">{t("deployments.allStatuses")}</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
               {s}
@@ -94,7 +96,7 @@ export function Deployments() {
           ))}
         </select>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--color-neutral-500)" }}>
-          {loading ? "Chargement…" : total > 0 ? `${from}–${to} sur ${total}` : "0 résultat"}
+          {loading ? t("common.loading") : total > 0 ? t("common.resultsRange", { from, to, total }) : t("common.noResults")}
         </span>
       </div>
 
@@ -104,19 +106,19 @@ export function Deployments() {
         <table className="table">
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Agent</th>
-              <th>Type</th>
-              <th>Paramètres</th>
-              <th>Statut</th>
-              <th>Message</th>
+              <th>{t("common.columns.date")}</th>
+              <th>{t("common.columns.agent")}</th>
+              <th>{t("common.columns.type")}</th>
+              <th>{t("common.columns.parameters")}</th>
+              <th>{t("common.columns.status")}</th>
+              <th>{t("common.columns.message")}</th>
             </tr>
           </thead>
           <tbody>
             {commands.map((c) => (
               <tr key={c.id}>
                 <td style={{ fontSize: 12, color: "var(--color-neutral-500)", whiteSpace: "nowrap" }}>
-                  {new Date(c.created_at).toLocaleString()}
+                  {new Date(c.created_at).toLocaleString(locale)}
                 </td>
                 <td style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>
                   <Link to={`/agents/${c.agent_id}`}>{agentsByID.get(c.agent_id)?.hostname || c.agent_id}</Link>
@@ -144,7 +146,7 @@ export function Deployments() {
             {commands.length === 0 && !loading && (
               <tr>
                 <td colSpan={6} style={{ color: "var(--color-neutral-500)" }}>
-                  Aucun déploiement ne correspond à ces filtres.
+                  {t("deployments.empty")}
                 </td>
               </tr>
             )}
@@ -154,10 +156,10 @@ export function Deployments() {
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8.4 }}>
         <button type="button" className="btn btn-secondary" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-          Précédent
+          {t("common.previous")}
         </button>
         <button type="button" className="btn btn-secondary" disabled={offset + PAGE_SIZE >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>
-          Suivant
+          {t("common.next")}
         </button>
       </div>
     </div>

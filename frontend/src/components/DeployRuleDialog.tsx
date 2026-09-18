@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { api } from "../lib/api";
 import { randomUUID } from "../lib/uuid";
+import { useTranslation } from "../i18n";
 
 type RuleKind = "set_mode" | "set_boolean" | "chcon";
 
@@ -13,6 +14,7 @@ export function DeployRuleDialog({
   onClose: () => void;
   onDeployed: () => void;
 }) {
+  const { t } = useTranslation();
   const [kind, setKind] = useState<RuleKind>("set_mode");
   const [mode, setMode] = useState<"enforcing" | "permissive">("permissive");
   const [boolName, setBoolName] = useState("");
@@ -64,16 +66,17 @@ export function DeployRuleDialog({
       onClick={onClose}
     >
       <div className="dialog" style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
-        <h4 className="dialog-title">Déployer une règle</h4>
+        <h4 className="dialog-title">{t("deployDialog.title")}</h4>
         <div className="dialog-body" style={{ display: "flex", flexDirection: "column", gap: 11.2 }}>
           <p style={{ margin: 0 }}>
-            Cible : <strong>{agentIds.length}</strong> agent{agentIds.length > 1 ? "s" : ""}
+            {t("deployDialog.target")} <strong>{agentIds.length}</strong>{" "}
+            {t("deployDialog.targetAgents", { count: agentIds.length })}
           </p>
 
           <div className="seg">
             <label className="seg-opt" style={kind === "set_mode" ? { color: "var(--color-accent)" } : undefined}>
               <input type="radio" name="kind" checked={kind === "set_mode"} onChange={() => setKind("set_mode")} />
-              Mode SELinux
+              {t("deployDialog.kindMode")}
             </label>
             <label className="seg-opt" style={kind === "set_boolean" ? { color: "var(--color-accent)" } : undefined}>
               <input
@@ -82,11 +85,11 @@ export function DeployRuleDialog({
                 checked={kind === "set_boolean"}
                 onChange={() => setKind("set_boolean")}
               />
-              Booléen
+              {t("deployDialog.kindBoolean")}
             </label>
             <label className="seg-opt" style={kind === "chcon" ? { color: "var(--color-accent)" } : undefined}>
               <input type="radio" name="kind" checked={kind === "chcon"} onChange={() => setKind("chcon")} />
-              Contexte fichier
+              {t("deployDialog.kindChcon")}
             </label>
           </div>
 
@@ -116,7 +119,7 @@ export function DeployRuleDialog({
           {kind === "set_boolean" && (
             <>
               <div className="field">
-                <label>Nom du booléen</label>
+                <label>{t("deployDialog.booleanName")}</label>
                 <input
                   className="input"
                   placeholder="httpd_can_network_connect"
@@ -140,7 +143,7 @@ export function DeployRuleDialog({
           {kind === "chcon" && (
             <>
               <div className="field">
-                <label>Chemin du fichier</label>
+                <label>{t("deployDialog.filePath")}</label>
                 <input
                   className="input"
                   placeholder="/var/www/html/index.html"
@@ -149,7 +152,7 @@ export function DeployRuleDialog({
                 />
               </div>
               <div className="field">
-                <label>Type de contexte</label>
+                <label>{t("deployDialog.contextType")}</label>
                 <input
                   className="input"
                   placeholder="httpd_sys_content_t"
@@ -163,7 +166,7 @@ export function DeployRuleDialog({
                   checked={chconRecursive}
                   onChange={(e) => setChconRecursive(e.target.checked)}
                 />
-                Récursif (-R)
+                {t("deployDialog.recursive")}
               </label>
             </>
           )}
@@ -172,7 +175,7 @@ export function DeployRuleDialog({
         </div>
         <div className="dialog-actions">
           <button type="button" className="btn btn-secondary" onClick={onClose}>
-            Annuler
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -184,7 +187,7 @@ export function DeployRuleDialog({
             }
             onClick={submit}
           >
-            {submitting ? "Déploiement…" : "Déployer"}
+            {submitting ? t("common.deploying") : t("common.deploy")}
           </button>
         </div>
       </div>

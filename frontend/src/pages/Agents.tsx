@@ -2,8 +2,11 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Agent } from "../lib/api";
 import { DeployRuleDialog } from "../components/DeployRuleDialog";
+import { useTranslation } from "../i18n";
+import { randomUUID } from "../lib/uuid";
 
 export function Agents() {
+  const { t, locale } = useTranslation();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -49,7 +52,7 @@ export function Agents() {
           payload_json: JSON.stringify({ mode: "permissive" }),
           agent_ids: Array.from(selected),
         },
-        crypto.randomUUID(),
+        randomUUID(),
       );
       await load();
     } catch (err) {
@@ -75,10 +78,10 @@ export function Agents() {
         }}
       >
         <span style={{ fontSize: 13, color: "var(--color-neutral-400)" }}>
-          {selected.size === 0 ? "Aucune sélection" : `${selected.size} sélectionné(s)`}
+          {selected.size === 0 ? t("agents.noSelection") : t("agents.selectedCount", { count: selected.size })}
         </span>
         <button type="button" className="btn btn-secondary" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>
-          Vider
+          {t("agents.clear")}
         </button>
         <button
           type="button"
@@ -87,7 +90,7 @@ export function Agents() {
           onClick={setPermissiveSelection}
         >
           <i className="ph ph-eye" style={{ fontSize: 14 }} />
-          {settingPermissive ? "…" : "Passer en permissive"}
+          {settingPermissive ? "…" : t("agents.setPermissive")}
         </button>
         <button
           type="button"
@@ -97,7 +100,7 @@ export function Agents() {
           onClick={() => setDialogOpen(true)}
         >
           <i className="ph ph-upload-simple" style={{ fontSize: 14 }} />
-          Déployer une règle
+          {t("common.deployRule")}
         </button>
       </div>
 
@@ -108,11 +111,11 @@ export function Agents() {
             <th style={{ width: 34 }}>
               <input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} />
             </th>
-            <th>Hôte</th>
-            <th>Mode</th>
-            <th>OS / noyau</th>
-            <th>Politique</th>
-            <th>Vu</th>
+            <th>{t("common.columns.host")}</th>
+            <th>{t("common.columns.mode")}</th>
+            <th>{t("common.columns.osKernel")}</th>
+            <th>{t("common.columns.policy")}</th>
+            <th>{t("common.columns.lastSeen")}</th>
             <th></th>
           </tr>
         </thead>
@@ -149,11 +152,11 @@ export function Agents() {
                 {a.policy_version ? ` (${a.policy_version})` : ""}
               </td>
               <td style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>
-                {a.last_seen_at ? new Date(a.last_seen_at).toLocaleString() : "jamais"}
+                {a.last_seen_at ? new Date(a.last_seen_at).toLocaleString(locale) : t("common.never")}
               </td>
               <td style={{ textAlign: "right" }}>
                 <Link to={`/agents/${a.id}`} className="btn btn-ghost">
-                  Ouvrir
+                  {t("common.open")}
                 </Link>
               </td>
             </tr>
@@ -161,7 +164,7 @@ export function Agents() {
           {agents.length === 0 && (
             <tr>
               <td colSpan={7} style={{ color: "var(--color-neutral-500)" }}>
-                Aucun agent enrôlé pour l'instant.
+                {t("agents.empty")}
               </td>
             </tr>
           )}

@@ -4,8 +4,10 @@ import { api, type Agent, type AvcEventHit, type Command, type SelinuxState } fr
 import { DeployRuleDialog } from "../components/DeployRuleDialog";
 import { formatPayload, statusTagClass } from "../lib/commandFormat";
 import { randomUUID } from "../lib/uuid";
+import { useTranslation } from "../i18n";
 
 export function AgentDetail() {
+  const { t, locale } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const [agent, setAgent] = useState<Agent | null>(null);
   const [denials, setDenials] = useState<AvcEventHit[]>([]);
@@ -47,7 +49,7 @@ export function AgentDetail() {
 
   const switchMode = async (mode: "enforcing" | "permissive") => {
     if (!agent || mode === agent.mode) return;
-    if (!window.confirm(`Passer ${agent.hostname} en mode ${mode} ?`)) return;
+    if (!window.confirm(t("agentDetail.confirmSetMode", { hostname: agent.hostname, mode }))) return;
     setSwitchingMode(true);
     try {
       await api.deployRule(
@@ -65,7 +67,12 @@ export function AgentDetail() {
   const toggleBoolean = async (b: { name: string; value: boolean }) => {
     if (!agent) return;
     const newValue = !b.value;
-    if (!window.confirm(`Passer le booléen ${b.name} à ${newValue ? "on" : "off"} sur ${agent.hostname} ?`)) return;
+    if (
+      !window.confirm(
+        t("agentDetail.confirmToggleBoolean", { name: b.name, value: newValue ? "on" : "off", hostname: agent.hostname }),
+      )
+    )
+      return;
     setSwitchingBoolean(b.name);
     try {
       await api.deployRule(
@@ -86,13 +93,13 @@ export function AgentDetail() {
   };
 
   if (error) return <div style={{ color: "var(--color-accent-300)" }}>{error}</div>;
-  if (!agent) return <p style={{ color: "var(--color-neutral-500)" }}>Chargement…</p>;
+  if (!agent) return <p style={{ color: "var(--color-neutral-500)" }}>{t("common.loading")}</p>;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16.8 }}>
       <Link to="/agents" className="btn btn-ghost" style={{ alignSelf: "flex-start" }}>
         <i className="ph ph-arrow-left" style={{ fontSize: 14 }} />
-        Inventaire
+        {t("agentDetail.backToInventory")}
       </Link>
 
       <section
@@ -121,11 +128,11 @@ export function AgentDetail() {
           </span>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8.4, fontSize: 12.5 }}>
-          <Field label="Adresse" value={agent.ip} />
-          <Field label="Statut" value={agent.status} />
-          <Field label="OS / noyau" value={`${agent.os_release} / ${agent.kernel_version}`} />
+          <Field label={t("agentDetail.address")} value={agent.ip} />
+          <Field label={t("common.columns.status")} value={agent.status} />
+          <Field label={t("common.columns.osKernel")} value={`${agent.os_release} / ${agent.kernel_version}`} />
           <span style={{ display: "flex", flexDirection: "column", gap: 3.5 }}>
-            <span style={{ color: "var(--color-neutral-600)", fontSize: 11 }}>Mode</span>
+            <span style={{ color: "var(--color-neutral-600)", fontSize: 11 }}>{t("common.columns.mode")}</span>
             <div className="seg" style={{ width: "fit-content" }}>
               <label
                 className="seg-opt"
@@ -155,12 +162,15 @@ export function AgentDetail() {
               </label>
             </div>
           </span>
-          <Field label="Politique" value={`${agent.policy_name} ${agent.policy_version}`.trim()} />
-          <Field label="Vu la dernière fois" value={agent.last_seen_at ? new Date(agent.last_seen_at).toLocaleString() : "jamais"} />
+          <Field label={t("common.columns.policy")} value={`${agent.policy_name} ${agent.policy_version}`.trim()} />
+          <Field
+            label={t("common.columns.lastSeen")}
+            value={agent.last_seen_at ? new Date(agent.last_seen_at).toLocaleString(locale) : t("common.never")}
+          />
         </div>
         <button type="button" className="btn btn-primary" style={{ alignSelf: "flex-start" }} onClick={() => setDialogOpen(true)}>
           <i className="ph ph-upload-simple" style={{ fontSize: 14 }} />
-          Déployer une règle sur cet agent
+          {t("agentDetail.deployRuleOnAgent")}
         </button>
       </section>
 
@@ -176,27 +186,27 @@ export function AgentDetail() {
         }}
       >
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-          <h5 style={{ margin: 0, fontSize: 15 }}>Règles appliquées</h5>
+          <h5 style={{ margin: 0, fontSize: 15 }}>{t("agentDetail.rulesApplied")}</h5>
           <Link to={`/deployments?agent=${agent.id}`} className="btn btn-ghost">
-            Tout voir
+            {t("common.viewAll")}
           </Link>
         </div>
         <div style={{ overflowX: "auto" }}>
           <table className="table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Type</th>
-                <th>Paramètres</th>
-                <th>Statut</th>
-                <th>Message</th>
+                <th>{t("common.columns.date")}</th>
+                <th>{t("common.columns.type")}</th>
+                <th>{t("common.columns.parameters")}</th>
+                <th>{t("common.columns.status")}</th>
+                <th>{t("common.columns.message")}</th>
               </tr>
             </thead>
             <tbody>
               {commands.map((c) => (
                 <tr key={c.id}>
                   <td style={{ fontSize: 12, color: "var(--color-neutral-500)", whiteSpace: "nowrap" }}>
-                    {new Date(c.created_at).toLocaleString()}
+                    {new Date(c.created_at).toLocaleString(locale)}
                   </td>
                   <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5, whiteSpace: "nowrap" }}>{c.type}</td>
                   <td
@@ -221,7 +231,7 @@ export function AgentDetail() {
               {commands.length === 0 && (
                 <tr>
                   <td colSpan={5} style={{ color: "var(--color-neutral-500)" }}>
-                    Aucune règle déployée sur cet agent pour l'instant.
+                    {t("agentDetail.noRulesYet")}
                   </td>
                 </tr>
               )}
@@ -243,7 +253,7 @@ export function AgentDetail() {
       >
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8.4 }}>
           <h5 style={{ margin: 0, fontSize: 15 }}>
-            Booléens SELinux{" "}
+            {t("agentDetail.booleans")}{" "}
             <span className="tag tag-neutral" style={{ marginLeft: 4.2 }}>
               {selinuxState?.booleans.length ?? 0}
             </span>
@@ -251,12 +261,12 @@ export function AgentDetail() {
           <div style={{ display: "flex", alignItems: "center", gap: 8.4 }}>
             {selinuxState?.collected_at && (
               <span style={{ fontSize: 11, color: "var(--color-neutral-500)" }}>
-                relevé {new Date(selinuxState.collected_at).toLocaleString()}
+                {t("agentDetail.collectedAt", { date: new Date(selinuxState.collected_at).toLocaleString(locale) })}
               </span>
             )}
             <input
               className="input"
-              placeholder="Filtrer…"
+              placeholder={t("common.filter")}
               style={{ width: 180 }}
               value={booleanFilter}
               onChange={(e) => setBooleanFilter(e.target.value)}
@@ -267,8 +277,8 @@ export function AgentDetail() {
           <table className="table">
             <thead>
               <tr>
-                <th>Nom</th>
-                <th>Valeur</th>
+                <th>{t("common.columns.name")}</th>
+                <th>{t("common.columns.value")}</th>
                 <th />
               </tr>
             </thead>
@@ -288,7 +298,7 @@ export function AgentDetail() {
                         disabled={switchingBoolean === b.name}
                         onClick={() => toggleBoolean(b)}
                       >
-                        Basculer
+                        {t("agentDetail.toggle")}
                       </button>
                     </td>
                   </tr>
@@ -296,7 +306,7 @@ export function AgentDetail() {
               {selinuxState && selinuxState.booleans.length === 0 && (
                 <tr>
                   <td colSpan={3} style={{ color: "var(--color-neutral-500)" }}>
-                    Aucune donnée pour l'instant — envoyée automatiquement par l'agent après connexion.
+                    {t("agentDetail.noInventoryYet")}
                   </td>
                 </tr>
               )}
@@ -318,14 +328,14 @@ export function AgentDetail() {
       >
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8.4 }}>
           <h5 style={{ margin: 0, fontSize: 15 }}>
-            Modules de policy{" "}
+            {t("agentDetail.modules")}{" "}
             <span className="tag tag-neutral" style={{ marginLeft: 4.2 }}>
               {selinuxState?.modules.length ?? 0}
             </span>
           </h5>
           <input
             className="input"
-            placeholder="Filtrer…"
+            placeholder={t("common.filter")}
             style={{ width: 180 }}
             value={moduleFilter}
             onChange={(e) => setModuleFilter(e.target.value)}
@@ -335,8 +345,8 @@ export function AgentDetail() {
           <table className="table">
             <thead>
               <tr>
-                <th>Nom</th>
-                <th>Version</th>
+                <th>{t("common.columns.name")}</th>
+                <th>{t("common.columns.version")}</th>
               </tr>
             </thead>
             <tbody>
@@ -351,7 +361,7 @@ export function AgentDetail() {
               {selinuxState && selinuxState.modules.length === 0 && (
                 <tr>
                   <td colSpan={2} style={{ color: "var(--color-neutral-500)" }}>
-                    Aucune donnée pour l'instant — envoyée automatiquement par l'agent après connexion.
+                    {t("agentDetail.noInventoryYet")}
                   </td>
                 </tr>
               )}
@@ -372,21 +382,21 @@ export function AgentDetail() {
         }}
       >
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-          <h5 style={{ margin: 0, fontSize: 15 }}>Logs / denials récents</h5>
+          <h5 style={{ margin: 0, fontSize: 15 }}>{t("agentDetail.logsRecentDenials")}</h5>
           <Link to={`/denials?agent=${agent.id}`} className="btn btn-ghost">
-            Tout voir
+            {t("common.viewAll")}
           </Link>
         </div>
         <div style={{ overflowX: "auto" }}>
         <table className="table">
           <thead>
             <tr>
-              <th>Horodatage</th>
-              <th>Source → cible</th>
-              <th>Classe / perm</th>
-              <th>Commande</th>
-              <th>PID</th>
-              <th>Chemin</th>
+              <th>{t("common.columns.timestamp")}</th>
+              <th>{t("common.columns.sourceTarget")}</th>
+              <th>{t("common.columns.classPerm")}</th>
+              <th>{t("common.columns.command")}</th>
+              <th>{t("common.columns.pid")}</th>
+              <th>{t("common.columns.path")}</th>
             </tr>
           </thead>
           <tbody>
@@ -397,7 +407,7 @@ export function AgentDetail() {
                   style={{ cursor: "pointer" }}
                   onClick={() => setExpandedDenial(expandedDenial === i ? null : i)}
                 >
-                  <td style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>{new Date(d.timestamp).toLocaleTimeString()}</td>
+                  <td style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>{new Date(d.timestamp).toLocaleTimeString(locale)}</td>
                   <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12 }}>
                     {d.scontext} → {d.tcontext}
                   </td>
@@ -430,7 +440,7 @@ export function AgentDetail() {
             {denials.length === 0 && (
               <tr>
                 <td colSpan={6} style={{ color: "var(--color-neutral-500)" }}>
-                  Aucun denial observé pour cet agent.
+                  {t("agentDetail.noDenialsForAgent")}
                 </td>
               </tr>
             )}

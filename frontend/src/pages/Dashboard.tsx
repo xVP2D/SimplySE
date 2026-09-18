@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Agent, type Alert, type Command, type TopSignature } from "../lib/api";
 import { evaluateFleet, fleetScore } from "../lib/compliance";
+import { useTranslation } from "../i18n";
 
 function StatCard({ label, value, meta }: { label: string; value: string | number; meta: string }) {
   return (
@@ -33,6 +34,7 @@ function StatCard({ label, value, meta }: { label: string; value: string | numbe
 }
 
 export function Dashboard() {
+  const { t } = useTranslation();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [topSignatures, setTopSignatures] = useState<TopSignature[]>([]);
   const [recentCommands, setRecentCommands] = useState<Command[]>([]);
@@ -82,17 +84,29 @@ export function Dashboard() {
     <div style={{ display: "flex", flexDirection: "column", gap: 16.8 }}>
       {error && (
         <div style={{ color: "var(--color-accent-300)", fontSize: 13 }}>
-          Impossible de joindre le master : {error}
+          {t("dashboard.masterUnreachable", { error })}
         </div>
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(178px,1fr))", gap: 11.2 }}>
-        <StatCard label="Agents enrôlés" value={agents.length} meta={`${online} en ligne · ${agents.length - online} hors ligne`} />
-        <StatCard label="Enforcing" value={enforcing} meta={`${permissive} permissive · ${disabled} disabled`} />
-        <StatCard label="Denials (fenêtre observée)" value={totalDenials} meta={`${topSignatures.length} signatures distinctes`} />
-        <StatCard label="Commandes récentes" value={recentCommands.length} meta="voir Déploiements" />
-        <StatCard label="Alertes ouvertes" value={openAlertsTotal} meta="signatures nouvelles ou anormales" />
-        <StatCard label="Conformité" value={`${complianceScore} %`} meta="vérifications de base" />
+        <StatCard
+          label={t("dashboard.statEnrolledAgents")}
+          value={agents.length}
+          meta={t("dashboard.statEnrolledAgentsMeta", { online, offline: agents.length - online })}
+        />
+        <StatCard
+          label={t("dashboard.statEnforcing")}
+          value={enforcing}
+          meta={t("dashboard.statEnforcingMeta", { permissive, disabled })}
+        />
+        <StatCard
+          label={t("dashboard.statDenials")}
+          value={totalDenials}
+          meta={t("dashboard.statDenialsMeta", { count: topSignatures.length })}
+        />
+        <StatCard label={t("dashboard.statRecentCommands")} value={recentCommands.length} meta={t("dashboard.statRecentCommandsMeta")} />
+        <StatCard label={t("dashboard.statOpenAlerts")} value={openAlertsTotal} meta={t("dashboard.statOpenAlertsMeta")} />
+        <StatCard label={t("dashboard.statCompliance")} value={`${complianceScore} %`} meta={t("dashboard.statComplianceMeta")} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: 11.2, alignItems: "start" }}>
@@ -108,18 +122,18 @@ export function Dashboard() {
           }}
         >
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 11.2 }}>
-            <h5 style={{ margin: 0, fontSize: 15 }}>Signatures les plus fréquentes</h5>
+            <h5 style={{ margin: 0, fontSize: 15 }}>{t("dashboard.topSignatures")}</h5>
             <Link to="/denials" className="btn btn-ghost">
-              Tout voir
+              {t("common.viewAll")}
             </Link>
           </div>
           <table className="table">
             <thead>
               <tr>
-                <th>Source → cible</th>
-                <th>Classe / perm</th>
-                <th style={{ textAlign: "right" }}>Occur.</th>
-                <th style={{ textAlign: "right" }}>Agents</th>
+                <th>{t("common.columns.sourceTarget")}</th>
+                <th>{t("common.columns.classPerm")}</th>
+                <th style={{ textAlign: "right" }}>{t("dashboard.colOccurrences")}</th>
+                <th style={{ textAlign: "right" }}>{t("dashboard.colAgents")}</th>
               </tr>
             </thead>
             <tbody>
@@ -136,7 +150,7 @@ export function Dashboard() {
               {topSignatures.length === 0 && (
                 <tr>
                   <td colSpan={4} style={{ color: "var(--color-neutral-500)" }}>
-                    Aucun denial observé pour l'instant.
+                    {t("dashboard.noDenialsYet")}
                   </td>
                 </tr>
               )}
@@ -156,9 +170,9 @@ export function Dashboard() {
           }}
         >
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 11.2 }}>
-            <h5 style={{ margin: 0, fontSize: 15 }}>Déploiements récents</h5>
+            <h5 style={{ margin: 0, fontSize: 15 }}>{t("dashboard.recentDeployments")}</h5>
             <Link to="/deployments" className="btn btn-ghost">
-              Historique
+              {t("dashboard.history")}
             </Link>
           </div>
           {recentCommands.map((c) => (
@@ -180,7 +194,7 @@ export function Dashboard() {
             </div>
           ))}
           {recentCommands.length === 0 && (
-            <p style={{ color: "var(--color-neutral-500)", fontSize: 13 }}>Aucun déploiement pour l'instant.</p>
+            <p style={{ color: "var(--color-neutral-500)", fontSize: 13 }}>{t("dashboard.noDeploymentsYet")}</p>
           )}
         </section>
 
@@ -196,9 +210,9 @@ export function Dashboard() {
           }}
         >
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 11.2 }}>
-            <h5 style={{ margin: 0, fontSize: 15 }}>Alertes ouvertes</h5>
+            <h5 style={{ margin: 0, fontSize: 15 }}>{t("dashboard.openAlerts")}</h5>
             <Link to="/alerts" className="btn btn-ghost">
-              Centre d'alertes
+              {t("dashboard.alertCenter")}
             </Link>
           </div>
           {openAlerts.map((a) => (
@@ -223,7 +237,7 @@ export function Dashboard() {
             </div>
           ))}
           {openAlerts.length === 0 && (
-            <p style={{ color: "var(--color-neutral-500)", fontSize: 13 }}>Aucune alerte ouverte.</p>
+            <p style={{ color: "var(--color-neutral-500)", fontSize: 13 }}>{t("dashboard.noOpenAlerts")}</p>
           )}
         </section>
       </div>
