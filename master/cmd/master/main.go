@@ -18,6 +18,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 
 	"console-selinux/master/internal/api"
 	"console-selinux/master/internal/certs"
@@ -216,7 +217,24 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	grpcServer := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsCfg)))
+	// Without an explicit EnforcementPolicy, grpc-go's server-side default
+	// MinTime is 5 minutes — far above the agent's own 15s HTTP/2 keepalive
+	// ping interval (agent/src/grpc.rs's http2_keep_alive_interval). The
+	// server was treating every one of those pings as a flood ("too many
+	// pings") and forcibly closing the connection with GOAWAY once enough
+	// accumulated, which is exactly what the agent logged as a recurring
+	// "h2 protocol error ... broken pipe" every ~60-70s — confirmed by
+	// checking real agent logs showing this cycle repeating continuously
+	// since enrollment. MinTime here must be <= the agent's actual ping
+	// interval; PermitWithoutStream is harmless to allow too, in case a
+	// future client ever pings between streams.
+	grpcServer := grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(tlsCfg)),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	)
 	selinuxv1.RegisterAgentLinkServer(grpcServer, &server.AgentLinkServer{
 		Store: pg,
 		Queue: queue,
