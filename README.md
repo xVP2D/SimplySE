@@ -289,6 +289,32 @@ du fichier concerné. Déclencheurs : immédiatement après l'accusé d'un
   interrogée qu'à sa reconnexion ; les agents antérieurs à cette fonction
   ignorent la question (leurs denials restent affichés) — les mettre à jour.
 
+## Collecter tous les denials d'un domaine
+
+Corriger un denial n'en révèle souvent qu'un autre : SELinux ne signale que
+le premier refus de chaque opération, donc un domaine bloqué à plusieurs
+endroits demande une approbation à la fois, au compte-gouttes (`search`,
+puis `addname`, puis `create`, puis `open`...).
+
+Sur chaque denial, le bouton **Collecter ce domaine** (avec un préréglage de
+durée : 5/10/30/60 min) rend le domaine **temporairement permissif** sur
+cette seule machine : plus rien n'est bloqué le temps de la fenêtre, tout est
+journalisé, puis une **seule** suggestion couvre tout ce qui a été observé et
+le domaine revient à enforced. Confirmation obligatoire avant de lancer
+(l'action affecte une vraie machine, même temporairement) ; une page agent
+affiche les collectes en cours (avec arrêt anticipé) et terminées (lien vers
+la suggestion).
+
+Le retour à enforced **ne dépend jamais du master** : l'agent garde sa propre
+échéance sur disque
+(`/var/lib/selinux-fleet-manager/permissive.json`) et la fait respecter
+lui-même, y compris après son propre redémarrage — même si le master est
+injoignable entre-temps. Un domaine déjà permissif avant la collecte n'est
+jamais touché, ni au démarrage ni à l'arrêt. Domaines refusés d'office :
+`kernel_t`, `init_t` (toute la machine perdrait son confinement). Pendant la
+fenêtre, les suggestions automatiques par permission sont mises en pause
+pour ce domaine — la collecte les remplace par une seule suggestion globale.
+
 ## Supprimer une règle appliquée (annulation réelle)
 
 Le bouton **Supprimer** d'une ligne de « Règles appliquées » (page agent) ou
