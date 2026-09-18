@@ -157,3 +157,31 @@ CREATE TABLE IF NOT EXISTS integration_settings (
     config_json JSONB NOT NULL DEFAULT '{}',
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- "Collect every denial of a domain" runs (see internal/server/collect.go):
+-- the domain is made permissive on one agent for a bounded time, then one
+-- suggestion covering everything logged is generated. One active run per
+-- (agent, domain); finished rows stay as an audit trail of when a domain
+-- was loosened, by whom and for how long.
+CREATE TABLE IF NOT EXISTS domain_collections (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id          TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    domain            TEXT NOT NULL,
+    -- starting -> collecting -> stopping -> done | failed
+    status            TEXT NOT NULL DEFAULT 'starting',
+    duration_secs     INT NOT NULL,
+    created_by        TEXT NOT NULL DEFAULT 'operator',
+    started_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    collecting_since  TIMESTAMPTZ,
+    ends_at           TIMESTAMPTZ,
+    start_command_id  UUID,
+    stop_command_id   UUID,
+    stop_sent_at      TIMESTAMPTZ,
+    suggestion_id     UUID,
+    lines_count       INT NOT NULL DEFAULT 0,
+    message           TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_domain_collections_one_active
+    ON domain_collections (agent_id, domain)
+    WHERE status IN ('starting', 'collecting', 'stopping');
+CREATE INDEX IF NOT EXISTS idx_domain_collections_started_at ON domain_collections (started_at DESC);

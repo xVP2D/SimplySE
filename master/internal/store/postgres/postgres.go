@@ -353,10 +353,11 @@ func (s *Store) ListCommands(ctx context.Context, opts ListCommandsOptions) (Lis
 		SELECT `+commandColumns+`, count(*) OVER() AS total
 		FROM commands c
 		WHERE ($1 = '' OR c.agent_id = $1) AND ($2 = '' OR c.status = $2)
-		  -- audit2allow generation is not an applied rule: it is tracked on
-		  -- the Suggestions page, and listing it here only doubled every
-		  -- approved module with a row that can't be deleted.
-		  AND c.type <> 'suggest_module'
+		  -- audit2allow generation and permissive collection windows are not
+		  -- applied rules: they are tracked on the Suggestions page (the
+		  -- latter in domain_collections), and listing them here only
+		  -- doubled every approved module with a row that can't be deleted.
+		  AND c.type NOT IN ('suggest_module', 'permissive_start', 'permissive_stop')
 		ORDER BY c.created_at DESC
 		LIMIT $3 OFFSET $4
 	`, opts.AgentID, opts.Status, opts.Limit, opts.Offset)
@@ -822,4 +823,135 @@ func (s *Store) GetIntegrationSetting(ctx context.Context, key string) (Integrat
 		return IntegrationSetting{}, false, fmt.Errorf("get integration setting %s: %w", key, err)
 	}
 	return setting, true, nil
+}
+
+// Collection is one "collect every denial of a domain" run.
+type Collection struct {
+	ID              string     `json:"id"`
+	AgentID         string     `json:"agent_id"`
+	Domain          string     `json:"domain"`
+	Status          string     `json:"status"`
+	DurationSecs    int        `json:"duration_secs"`
+	CreatedBy       string     `json:"created_by"`
+	StartedAt       time.Time  `json:"started_at"`
+	CollectingSince *time.Time `json:"collecting_since,omitempty"`
+	EndsAt          *time.Time `json:"ends_at,omitempty"`
+	SuggestionID    *string    `json:"suggestion_id,omitempty"`
+	LinesCount      int        `json:"lines_count"`
+	Message         string     `json:"message"`
+
+	StartCommandID *string    `json:"-"`
+	StopCommandID  *string    `json:"-"`
+	StopSentAt     *time.Time `json:"-"`
+}
+
+// ErrCollectionActive: that agent is already collecting that domain.
+var ErrCollectionActive = errors.New("this domain is already being collected on this agent")
+
+const collectionColumns = `id, agent_id, domain, status, duration_secs, created_by, started_at, collecting_since, ends_at,
+	suggestion_id, lines_count, message, start_command_id, stop_command_id, stop_sent_at`
+
+func scanCollection(row interface{ Scan(...any) error }) (Collection, error) {
+	var c Collection
+	err := row.Scan(&c.ID, &c.AgentID, &c.Domain, &c.Status, &c.DurationSecs, &c.CreatedBy, &c.StartedAt,
+		&c.CollectingSince, &c.EndsAt, &c.SuggestionID, &c.LinesCount, &c.Message,
+		&c.StartCommandID, &c.StopCommandID, &c.StopSentAt)
+	return c, err
+}
+
+func (s *Store) CreateCollection(ctx context.Context, agentID, domain string, durationSecs int, by string) (Collection, error) {
+	c, err := scanCollection(s.db.QueryRowContext(ctx, `
+		INSERT INTO domain_collections (agent_id, domain, duration_secs, created_by)
+		VALUES ($1, $2, $3, $4)
+		RETURNING `+collectionColumns, agentID, domain, durationSecs, by))
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return Collection{}, ErrCollectionActive
+		}
+		return Collection{}, fmt.Errorf("create collection: %w", err)
+	}
+	return c, nil
+}
+
+func (s *Store) GetCollection(ctx context.Context, id string) (Collection, error) {
+	c, err := scanCollection(s.db.QueryRowContext(ctx, `SELECT `+collectionColumns+` FROM domain_collections WHERE id = $1`, id))
+	if err != nil {
+		return Collection{}, fmt.Errorf("get collection %s: %w", id, err)
+	}
+	return c, nil
+}
+
+// GetCollectionByCommand finds the run a start/stop command belongs to.
+func (s *Store) GetCollectionByCommand(ctx context.Context, commandID string) (Collection, bool, error) {
+	c, err := scanCollection(s.db.QueryRowContext(ctx, `
+		SELECT `+collectionColumns+` FROM domain_collections
+		WHERE start_command_id = $1 OR stop_command_id = $1`, commandID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Collection{}, false, nil
+	}
+	if err != nil {
+		return Collection{}, false, fmt.Errorf("get collection by command: %w", err)
+	}
+	return c, true, nil
+}
+
+func (s *Store) listCollections(ctx context.Context, where string, args ...any) ([]Collection, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+collectionColumns+` FROM domain_collections `+where, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list collections: %w", err)
+	}
+	defer rows.Close()
+	out := []Collection{}
+	for rows.Next() {
+		c, err := scanCollection(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan collection: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ListCollections: active runs first, then the most recent. agentID == ""
+// means every agent.
+func (s *Store) ListCollections(ctx context.Context, agentID string, limit int) ([]Collection, error) {
+	return s.listCollections(ctx,
+		`WHERE ($1 = '' OR agent_id = $1) ORDER BY (status IN ('starting','collecting','stopping')) DESC, started_at DESC LIMIT $2`,
+		agentID, limit)
+}
+
+func (s *Store) ListActiveCollections(ctx context.Context) ([]Collection, error) {
+	return s.listCollections(ctx, `WHERE status IN ('starting','collecting','stopping') ORDER BY started_at`)
+}
+
+func (s *Store) exec(ctx context.Context, what, query string, args ...any) error {
+	if _, err := s.db.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("%s: %w", what, err)
+	}
+	return nil
+}
+
+func (s *Store) SetCollectionStartCommand(ctx context.Context, id, commandID string) error {
+	return s.exec(ctx, "set collection start command", `UPDATE domain_collections SET start_command_id = $2 WHERE id = $1`, id, commandID)
+}
+
+// MarkCollecting: the agent confirmed the domain is permissive.
+func (s *Store) MarkCollecting(ctx context.Context, id string, endsAt time.Time) error {
+	return s.exec(ctx, "mark collecting", `
+		UPDATE domain_collections SET status = 'collecting', collecting_since = now(), ends_at = $2
+		WHERE id = $1 AND status = 'starting'`, id, endsAt)
+}
+
+// BeginStopping records that a stop was sent (again, on a retry).
+func (s *Store) BeginStopping(ctx context.Context, id, stopCommandID string) error {
+	return s.exec(ctx, "begin stopping", `
+		UPDATE domain_collections SET status = 'stopping', stop_command_id = $2, stop_sent_at = now()
+		WHERE id = $1 AND status IN ('collecting', 'stopping')`, id, stopCommandID)
+}
+
+func (s *Store) FinishCollection(ctx context.Context, id, status, message string, suggestionID *string, lines int) error {
+	return s.exec(ctx, "finish collection", `
+		UPDATE domain_collections SET status = $2, message = $3, suggestion_id = $4, lines_count = $5
+		WHERE id = $1 AND status IN ('starting', 'collecting', 'stopping')`, id, status, message, suggestionID, lines)
 }

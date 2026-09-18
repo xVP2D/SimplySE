@@ -151,3 +151,56 @@ func (s *Store) MarkResolved(ctx context.Context, agentID, sig string) (int64, e
 	}
 	return parsed.Updated, nil
 }
+
+// CollectedLines returns one raw AVC line per distinct denial (by signature)
+// that agentID logged for the given source domain between sinceUnix and
+// untilUnix — what a "collect every denial of a domain" run feeds to
+// audit2allow. domain must already be validated as a plain type name: it is
+// interpolated into a wildcard pattern.
+func (s *Store) CollectedLines(ctx context.Context, agentID, domain string, sinceUnix, untilUnix int64, limit int) ([]string, error) {
+	body := map[string]any{
+		"size": 0,
+		"query": map[string]any{"bool": map[string]any{"filter": []map[string]any{
+			{"term": map[string]any{"agent_id.keyword": agentID}},
+			{"wildcard": map[string]any{"scontext.keyword": "*:" + domain + ":*"}},
+			{"range": map[string]any{"ts_unix": map[string]any{"gte": sinceUnix, "lte": untilUnix}}},
+			{"exists": map[string]any{"field": "sig"}},
+		}}},
+		"aggs": map[string]any{
+			"sigs": map[string]any{
+				"terms": map[string]any{"field": "sig.keyword", "size": limit, "order": map[string]any{"latest": "desc"}},
+				"aggs": map[string]any{
+					"latest": map[string]any{"max": map[string]any{"field": "ts_unix"}},
+					"sample": map[string]any{"top_hits": map[string]any{"size": 1, "_source": []string{"raw_line"}}},
+				},
+			},
+		},
+	}
+	var parsed struct {
+		Aggregations struct {
+			Sigs struct {
+				Buckets []struct {
+					Sample struct {
+						Hits struct {
+							Hits []struct {
+								Source struct {
+									RawLine string `json:"raw_line"`
+								} `json:"_source"`
+							} `json:"hits"`
+						} `json:"hits"`
+					} `json:"sample"`
+				} `json:"buckets"`
+			} `json:"sigs"`
+		} `json:"aggregations"`
+	}
+	if err := s.runAggregation(ctx, body, &parsed); err != nil {
+		return nil, err
+	}
+	var lines []string
+	for _, b := range parsed.Aggregations.Sigs.Buckets {
+		if len(b.Sample.Hits.Hits) > 0 && b.Sample.Hits.Hits[0].Source.RawLine != "" {
+			lines = append(lines, b.Sample.Hits.Hits[0].Source.RawLine)
+		}
+	}
+	return lines, nil
+}

@@ -21,6 +21,9 @@ var commandTypeByName = map[string]selinuxv1.CommandType{
 	"suggest_module": selinuxv1.CommandType_COMMAND_TYPE_SUGGEST_MODULE,
 	"remove_module":  selinuxv1.CommandType_COMMAND_TYPE_REMOVE_MODULE,
 	"restorecon":     selinuxv1.CommandType_COMMAND_TYPE_RESTORECON,
+
+	"permissive_start": selinuxv1.CommandType_COMMAND_TYPE_PERMISSIVE_START,
+	"permissive_stop":  selinuxv1.CommandType_COMMAND_TYPE_PERMISSIVE_STOP,
 }
 
 // DispatchCommand persists a command for agentID and, if the agent is
@@ -173,4 +176,20 @@ func RequestModuleSuggestion(ctx context.Context, store *postgres.Store, hub *Hu
 		return postgres.SuggestedModule{}, fmt.Errorf("dispatch suggest_module: %w", err)
 	}
 	return store.CreateSuggestedModule(ctx, cmd.ID, agentID, moduleName, scontext, tcontext, tclass)
+}
+
+// RequestCollectedSuggestion dispatches one audit2allow generation over all
+// the raw lines a collection run gathered, under a name unique to that run.
+func RequestCollectedSuggestion(ctx context.Context, store *postgres.Store, hub *Hub, agentID, domain, moduleName string, lines []string) (postgres.SuggestedModule, error) {
+	payloadJSON, err := json.Marshal(map[string]any{"raw_lines": lines, "module_name": moduleName})
+	if err != nil {
+		return postgres.SuggestedModule{}, fmt.Errorf("marshal suggest_module payload: %w", err)
+	}
+	cmd, err := DispatchCommand(ctx, store, hub, agentID, nil, "suggest_module", string(payloadJSON))
+	if err != nil {
+		return postgres.SuggestedModule{}, fmt.Errorf("dispatch suggest_module: %w", err)
+	}
+	// One module for many targets/classes: the single-signature columns hold
+	// the domain and a wildcard.
+	return store.CreateSuggestedModule(ctx, cmd.ID, agentID, moduleName, "system_u:system_r:"+domain+":s0", "*", "*")
 }

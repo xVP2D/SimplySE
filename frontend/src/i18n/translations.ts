@@ -223,6 +223,24 @@ const en: Dict = {
     confirmReject: "Reject this suggestion?",
     empty: "No suggestions match this filter.",
   },
+  collect: {
+    startButton: "Collect this domain",
+    confirmStart:
+      "Make {domain} temporarily permissive on {host} for {minutes} min to log every denial it hits, then generate one suggestion covering all of them? It goes back to enforced on its own even if this fails.",
+    alreadyRunning: "A collection is already running for this domain on this agent",
+    panelTitle: "Domain collections",
+    stopButton: "Stop now",
+    until: "until {time}",
+    linesCollected: "{count} distinct denial | {count} distinct denials",
+    viewSuggestion: "View suggestion",
+    status: {
+      starting: "starting…",
+      collecting: "collecting…",
+      stopping: "stopping…",
+      done: "done",
+      failed: "failed",
+    },
+  },
   settings: {
     explainer:
       "Connect an already-deployed SIEM/EDR/monitoring tool (Wazuh, Suricata via an ELK-family stack, LibreNMS…) so denials can be correlated on demand against what it already saw around the same time — nothing is bulk-ingested or duplicated here, only queried live when you open an agent's correlation panel. Saving takes effect immediately, no restart needed.",
@@ -459,6 +477,24 @@ const fr: Dict = {
     confirmReject: "Rejeter cette suggestion ?",
     empty: "Aucune suggestion ne correspond à ce filtre.",
   },
+  collect: {
+    startButton: "Collecter ce domaine",
+    confirmStart:
+      "Rendre {domain} temporairement permissif sur {host} pendant {minutes} min pour journaliser tous ses denials, puis générer une seule suggestion pour tout ? Le domaine revient à enforced tout seul même en cas d'échec.",
+    alreadyRunning: "Une collecte est déjà en cours pour ce domaine sur cet agent",
+    panelTitle: "Collectes de domaine",
+    stopButton: "Arrêter maintenant",
+    until: "jusqu'à {time}",
+    linesCollected: "{count} denial distinct | {count} denials distincts",
+    viewSuggestion: "Voir la suggestion",
+    status: {
+      starting: "démarrage…",
+      collecting: "collecte…",
+      stopping: "arrêt…",
+      done: "terminée",
+      failed: "échouée",
+    },
+  },
   settings: {
     explainer:
       "Connectez un outil SIEM/EDR/supervision déjà déployé (Wazuh, Suricata via une stack ELK, LibreNMS…) pour corréler les dénis à la demande avec ce qu'il a déjà vu au même moment — rien n'est ingéré en masse ni dupliqué ici, seulement interrogé en direct à l'ouverture du panneau de corrélation d'un agent. L'enregistrement prend effet immédiatement, sans redémarrage.",
@@ -694,6 +730,24 @@ const es: Dict = {
     confirmApprove: "Instalar este módulo en {count} agente | Instalar este módulo en {count} agentes",
     confirmReject: "¿Rechazar esta sugerencia?",
     empty: "Ninguna sugerencia coincide con este filtro.",
+  },
+  collect: {
+    startButton: "Recolectar este dominio",
+    confirmStart:
+      "¿Hacer que {domain} sea temporalmente permisivo en {host} durante {minutes} min para registrar todas sus denegaciones, y generar una sola sugerencia para todas? Vuelve a enforced por sí solo aunque esto falle.",
+    alreadyRunning: "Ya hay una recolección en curso para este dominio en este agente",
+    panelTitle: "Recolecciones de dominio",
+    stopButton: "Detener ahora",
+    until: "hasta las {time}",
+    linesCollected: "{count} denegación distinta | {count} denegaciones distintas",
+    viewSuggestion: "Ver sugerencia",
+    status: {
+      starting: "iniciando…",
+      collecting: "recolectando…",
+      stopping: "deteniendo…",
+      done: "terminada",
+      failed: "fallida",
+    },
   },
   settings: {
     explainer:

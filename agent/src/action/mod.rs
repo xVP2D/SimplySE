@@ -23,6 +23,8 @@ pub async fn execute(cmd: &pb::Command) -> (bool, String) {
         pb::CommandType::SuggestModule => suggest_module(&cmd.payload_json).await,
         pb::CommandType::RemoveModule => remove_module(&cmd.payload_json).await,
         pb::CommandType::Restorecon => restorecon(&cmd.payload_json).await,
+        pb::CommandType::PermissiveStart => crate::permissive::start(&cmd.payload_json).await,
+        pb::CommandType::PermissiveStop => crate::permissive::stop(&cmd.payload_json).await,
         pb::CommandType::Unspecified => (false, "unknown command type".to_string()),
     }
 }

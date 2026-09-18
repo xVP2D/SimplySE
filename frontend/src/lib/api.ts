@@ -198,6 +198,21 @@ export interface ConnectionTestResult {
   error?: string;
 }
 
+export interface Collection {
+  id: string;
+  agent_id: string;
+  domain: string;
+  status: "starting" | "collecting" | "stopping" | "done" | "failed" | string;
+  duration_secs: number;
+  created_by: string;
+  started_at: string;
+  collecting_since?: string;
+  ends_at?: string;
+  suggestion_id?: string;
+  lines_count: number;
+  message: string;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...init,
@@ -237,6 +252,18 @@ export const api = {
     if (params.limit) qs.set("limit", String(params.limit));
     return request<DenialSearchResult>(`/denials?${qs.toString()}`);
   },
+  listCollections: (params: { agentId?: string; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.agentId) qs.set("agent_id", params.agentId);
+    qs.set("limit", String(params.limit ?? 20));
+    return request<Collection[]>(`/collections?${qs.toString()}`);
+  },
+  startCollection: (params: { agentId: string; domain: string; durationSecs: number }) =>
+    request<Collection>("/collections", {
+      method: "POST",
+      body: JSON.stringify({ agent_id: params.agentId, domain: params.domain, duration_secs: params.durationSecs }),
+    }),
+  stopCollection: (id: string) => request<{ status: string }>(`/collections/${id}/stop`, { method: "POST", body: JSON.stringify({}) }),
   quarantineDenial: (d: { index: string; id: string }) =>
     request<{ status: string }>("/denials/quarantine", { method: "POST", body: JSON.stringify({ index: d.index, id: d.id }) }),
   restoreDenial: (d: { index: string; id: string }) =>

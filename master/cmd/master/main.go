@@ -146,6 +146,8 @@ func run(log *slog.Logger) error {
 
 	engine := rules.NewEngine()
 	hub := server.NewHub()
+	collector := &server.Collector{Store: pg, Search: search, Hub: hub, Log: log}
+	go collector.Run(ctx)
 
 	if err := queue.ConsumeHeartbeats(ctx, func(m natsq.HeartbeatMsg) error {
 		// Fetched before the update so it reflects the mode as of the
@@ -201,7 +203,9 @@ func run(log *slog.Logger) error {
 		// Separate from the new-signature alert on purpose: a new permission
 		// on a known signature, or the same signature on another machine,
 		// needs its own suggestion but isn't a "new signature".
-		if engine.NeedsSuggestion(obs) {
+		// Paused for a domain under a "collect all denials" run: that run
+		// produces one suggestion for everything instead.
+		if !collector.Suppresses(m.AgentID, m.SContext) && engine.NeedsSuggestion(obs) {
 			if _, err := server.RequestModuleSuggestion(ctx, pg, hub, m.AgentID, m.SContext, m.TContext, m.TClass, m.RawLine); err != nil {
 				log.Error("request module suggestion failed", "agent_id", m.AgentID, "error", err)
 			}
@@ -251,11 +255,12 @@ func run(log *slog.Logger) error {
 	checker := &server.DenialChecker{Search: search, Hub: hub, Log: log}
 	go checker.Run(ctx, 30*time.Second)
 	selinuxv1.RegisterAgentLinkServer(grpcServer, &server.AgentLinkServer{
-		Store:   pg,
-		Queue:   queue,
-		Hub:     hub,
-		Log:     log,
-		Checker: checker,
+		Store:     pg,
+		Queue:     queue,
+		Hub:       hub,
+		Log:       log,
+		Checker:   checker,
+		Collector: collector,
 	})
 
 	grpcLis, err := net.Listen("tcp", cfg.GRPCAddr)
@@ -299,6 +304,7 @@ func run(log *slog.Logger) error {
 		EnrollKeyFile: cfg.AgentKeyFile,
 		FrontendDist:  cfg.FrontendDist,
 		Correlate:     correlateRegistry,
+		Collector:     collector,
 	}).Handler()
 	httpServer := &http.Server{Addr: cfg.HTTPAddr, Handler: apiHandler}
 	go func() {

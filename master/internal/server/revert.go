@@ -206,8 +206,9 @@ func DescribeRevert(c postgres.Command) RevertInfo {
 	switch {
 	case c.RevertPending:
 		return RevertInfo{Kind: RevertNone, Reason: ReasonInFlight}
-	case c.Type == "suggest_module":
-		// Tracked by the Suggestions page (FK), and nothing to undo.
+	case c.Type == "suggest_module", c.Type == "permissive_start", c.Type == "permissive_stop":
+		// Tracked elsewhere (Suggestions page / the collection run), and
+		// ended by that run, not by deleting a row.
 		return RevertInfo{Kind: RevertNone, Reason: ReasonNotSupported}
 	case c.Status == "failed" || c.Status == "pending":
 		return RevertInfo{Kind: RevertRecord}

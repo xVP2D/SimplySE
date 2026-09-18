@@ -4,7 +4,9 @@ import { api, type Agent, type AvcEventHit, type Command, type CorrelatedEvent, 
 import { DeployRuleDialog } from "../components/DeployRuleDialog";
 import { formatPayload, statusTagClass } from "../lib/commandFormat";
 import { RevertButton } from "../components/RevertButton";
-import { explainDenial } from "../lib/explainDenial";
+import { explainDenial, typeFromContext } from "../lib/explainDenial";
+import { CollectDomainButton } from "../components/CollectDomainButton";
+import { CollectionsPanel } from "../components/CollectionsPanel";
 import { randomUUID } from "../lib/uuid";
 import { useTranslation } from "../i18n";
 
@@ -22,6 +24,8 @@ export function AgentDetail() {
   const [correlatedEvents, setCorrelatedEvents] = useState<CorrelatedEvent[] | null>(null);
   const [suggesting, setSuggesting] = useState<number | null>(null);
   const [suggested, setSuggested] = useState<Set<number>>(new Set());
+  const [collectionsTick, setCollectionsTick] = useState(0);
+  const [activeCollectionDomains, setActiveCollectionDomains] = useState<Set<string>>(new Set());
   const [switchingMode, setSwitchingMode] = useState(false);
   const [switchingBoolean, setSwitchingBoolean] = useState<string | null>(null);
   const [booleanFilter, setBooleanFilter] = useState("");
@@ -57,6 +61,14 @@ export function AgentDetail() {
   useEffect(() => {
     api.correlateSources().then(setCorrelateSources).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!id) return;
+    api
+      .listCollections({ agentId: id, limit: 20 })
+      .then((list) => setActiveCollectionDomains(new Set(list.filter((c) => c.status !== "done" && c.status !== "failed").map((c) => c.domain))))
+      .catch(() => {});
+  }, [id, collectionsTick]);
 
   const toggleDenial = async (i: number, d: AvcEventHit) => {
     if (expandedDenial === i) {
@@ -473,6 +485,7 @@ export function AgentDetail() {
             {t("common.viewAll")}
           </Link>
         </div>
+        <CollectionsPanel agentId={agent.id} refreshKey={collectionsTick} />
         <div style={{ overflowX: "auto" }}>
         <table className="table">
           <thead>
@@ -520,7 +533,7 @@ export function AgentDetail() {
                       }}
                     >
                       <div>{d.raw_line}</div>
-                      <div style={{ marginTop: 8.4 }}>
+                      <div style={{ marginTop: 8.4, display: "flex", alignItems: "center", gap: 11.2, flexWrap: "wrap" }}>
                         {suggested.has(i) ? (
                           <Link to="/suggestions" className="tag tag-accent">
                             {t("denials.fixRequested")}
@@ -538,6 +551,17 @@ export function AgentDetail() {
                             {suggesting === i ? "…" : t("denials.fixButton")}
                           </button>
                         )}
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <CollectDomainButton
+                            agentId={agent.id}
+                            domain={typeFromContext(d.scontext)}
+                            host={agent.hostname || agent.id}
+                            disabledReason={
+                              activeCollectionDomains.has(typeFromContext(d.scontext)) ? t("collect.alreadyRunning") : undefined
+                            }
+                            onStarted={() => setCollectionsTick((n) => n + 1)}
+                          />
+                        </div>
                       </div>
                       {correlateSources.length > 0 && (
                         <div style={{ marginTop: 8.4, borderTop: "1px solid var(--color-divider)", paddingTop: 8.4 }}>

@@ -25,6 +25,8 @@ type AgentLinkServer struct {
 
 	// Checker may be nil (denial resolution off).
 	Checker *DenialChecker
+	// Collector may be nil (domain collection off).
+	Collector *Collector
 }
 
 func (s *AgentLinkServer) Session(stream selinuxv1.AgentLink_SessionServer) error {
@@ -144,6 +146,7 @@ func (s *AgentLinkServer) handleIncoming(ctx context.Context, agentID string, ms
 		s.completeSuggestionIfApplicable(ctx, ack)
 		s.completeRevertIfApplicable(ctx, ack.GetCommandId(), ack.GetSuccess(), ack.GetMessage())
 		s.checkDenialsAfterRule(ctx, agentID, ack.GetCommandId(), ack.GetSuccess())
+		s.Collector.OnAck(ctx, ack.GetCommandId(), ack.GetSuccess(), ack.GetMessage())
 
 	case *selinuxv1.AgentMessage_DenialsChecked:
 		if s.Checker != nil {

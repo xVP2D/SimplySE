@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -61,6 +62,9 @@ type API struct {
 	// RebuildCorrelateRegistry) — may be an empty, non-nil registry when
 	// none are.
 	Correlate *correlate.Registry
+
+	// Collector runs "collect every denial of a domain" (may be nil).
+	Collector *server.Collector
 }
 
 func (a *API) Routes() *http.ServeMux {
@@ -87,6 +91,9 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/suggested-modules/{id}", a.getSuggestedModule)
 	mux.HandleFunc("POST /api/suggested-modules/{id}/approve", a.approveSuggestedModule)
 	mux.HandleFunc("POST /api/suggested-modules/{id}/reject", a.rejectSuggestedModule)
+	mux.HandleFunc("GET /api/collections", a.listCollections)
+	mux.HandleFunc("POST /api/collections", a.startCollection)
+	mux.HandleFunc("POST /api/collections/{id}/stop", a.stopCollection)
 	mux.HandleFunc("POST /api/rules/deploy", a.deployRule)
 	mux.HandleFunc("GET /api/commands/{id}", a.getCommand)
 	mux.HandleFunc("GET /api/commands/recent", a.listRecentCommands)
@@ -580,6 +587,65 @@ func (a *API) rejectSuggestedModule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})
+}
+
+func (a *API) listCollections(w http.ResponseWriter, r *http.Request) {
+	list, err := a.Store.ListCollections(r.Context(), r.URL.Query().Get("agent_id"), parseLimit(r, 20))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+type startCollectionRequest struct {
+	AgentID      string `json:"agent_id"`
+	Domain       string `json:"domain"`
+	DurationSecs int    `json:"duration_secs"`
+	By           string `json:"by"`
+}
+
+// startCollection makes a domain temporarily permissive on one agent to log
+// all of its denials at once (see server.Collector).
+func (a *API) startCollection(w http.ResponseWriter, r *http.Request) {
+	var req startCollectionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	by := req.By
+	if by == "" {
+		by = "operator"
+	}
+	col, err := a.Collector.Start(r.Context(), req.AgentID, req.Domain, time.Duration(req.DurationSecs)*time.Second, by)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusAccepted, col)
+	case errors.Is(err, server.ErrInvalidCollection):
+		writeError(w, http.StatusBadRequest, fmt.Errorf("domain must be a plain type name ending in _t (not kernel_t/init_t) and duration_secs between %d and %d", server.MinCollectSecs, server.MaxCollectSecs))
+	case errors.Is(err, server.ErrAgentOffline), errors.Is(err, postgres.ErrCollectionActive):
+		writeError(w, http.StatusConflict, err)
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
+}
+
+func (a *API) stopCollection(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, errors.New("invalid collection id"))
+		return
+	}
+	switch err := a.Collector.Stop(r.Context(), id); {
+	case err == nil:
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopping"})
+	case errors.Is(err, server.ErrCollectionState):
+		writeError(w, http.StatusConflict, err)
+	case errors.Is(err, sql.ErrNoRows):
+		writeError(w, http.StatusNotFound, err)
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
 }
 
 type deployRuleRequest struct {

@@ -3,6 +3,7 @@ mod buffer;
 mod collector;
 mod config;
 mod grpc;
+mod permissive;
 mod selinux_access;
 mod selinux_info;
 
@@ -32,6 +33,11 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    // Close (or re-arm) any permissive collection window left over from
+    // before this process started — the way back never depends on the
+    // master, nor on the agent having stayed up.
+    permissive::recover().await;
 
     let (avc_tx, avc_rx) = tokio::sync::mpsc::channel(256);
     let audit_log_path = config.audit_log_path.clone();

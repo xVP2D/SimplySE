@@ -170,6 +170,19 @@ enum CommandType {
   // Runs `restorecon -v [-R] -- <path>`, i.e. resets the path to the
   // policy's default context. payload: {"path":"/abs/path","recursive":false}
   COMMAND_TYPE_RESTORECON = 7;
+  // Temporary "collect every denial of this domain" mode: `semanage
+  // permissive -a <domain>` so the domain's denials are logged but no
+  // longer blocked, revealing all of them at once instead of one per fix.
+  // The agent removes it again on its own after duration_secs (kept in a
+  // file, so it survives an agent restart and never depends on the master
+  // being alive to undo it). A domain that was ALREADY permissive is left
+  // untouched, start and stop alike.
+  // payload: {"domain":"syslogd_t","duration_secs":600}
+  COMMAND_TYPE_PERMISSIVE_START = 8;
+  // Ends the mode early / on schedule: `semanage permissive -d <domain>`
+  // (idempotent: already gone counts as success).
+  // payload: {"domain":"syslogd_t"}
+  COMMAND_TYPE_PERMISSIVE_STOP = 9;
 }
 
 message HeartbeatAck {
