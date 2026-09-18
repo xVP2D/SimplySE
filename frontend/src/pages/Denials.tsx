@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Agent, type AvcEventHit } from "../lib/api";
 import { useTranslation } from "../i18n";
+import { explainDenial } from "../lib/explainDenial";
 
 const PAGE_SIZE = 25;
 
@@ -137,7 +138,12 @@ export function Denials() {
                   <Link to={`/agents/${d.agent_id}`}>{agentsByID.get(d.agent_id)?.hostname || d.agent_id}</Link>
                 </td>
                 <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, maxWidth: 280, wordBreak: "break-word" }}>
-                  {d.scontext} → {d.tcontext}
+                  <div>
+                    {d.scontext} → {d.tcontext}
+                  </div>
+                  <div style={{ fontFamily: "var(--font-body, inherit)", fontSize: 11, color: "var(--color-neutral-500)", marginTop: 2 }}>
+                    {explainDenial(d, locale)}
+                  </div>
                 </td>
                 <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, color: "var(--color-neutral-400)" }}>
                   {d.tclass} · {d.perms.join(",")}

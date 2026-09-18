@@ -9,6 +9,7 @@ import { Deployments } from "./pages/Deployments";
 import { Alerts } from "./pages/Alerts";
 import { Suggestions } from "./pages/Suggestions";
 import { Compliance } from "./pages/Compliance";
+import { Wiki } from "./pages/Wiki";
 
 export function App() {
   return (
@@ -23,6 +24,7 @@ export function App() {
         <Route path="compliance" element={<Compliance />} />
         <Route path="alerts" element={<Alerts />} />
         <Route path="suggestions" element={<Suggestions />} />
+        <Route path="wiki" element={<Wiki />} />
       </Route>
     </Routes>
   );

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Agent, type MatrixRow, type TrendPoint } from "../lib/api";
 import { useTranslation } from "../i18n";
+import { explainDenial } from "../lib/explainDenial";
 
 const WINDOW_DAYS = [7, 30, 90, 0]; // 0 = all history
 
@@ -33,7 +34,7 @@ function Sparkline({ counts }: { counts: number[] }) {
 }
 
 export function Matrix() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [days, setDays] = useState(30);
   const [rows, setRows] = useState<MatrixRow[]>([]);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
@@ -128,7 +129,12 @@ export function Matrix() {
               {rows.map((row, i) => (
                 <tr key={i}>
                   <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12 }}>
-                    {row.scontext} → {row.tcontext}
+                    <div>
+                      {row.scontext} → {row.tcontext}
+                    </div>
+                    <div style={{ fontFamily: "var(--font-body, inherit)", fontSize: 11, color: "var(--color-neutral-500)", marginTop: 2 }}>
+                      {explainDenial(row, locale)}
+                    </div>
                   </td>
                   <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, color: "var(--color-neutral-400)" }}>
                     {row.tclass} · {row.perms.join(",")}

@@ -26,6 +26,7 @@ const en: Dict = {
     compliance: "Compliance",
     alerts: "Alerts",
     suggestions: "Suggestions",
+    wiki: "Wiki",
   },
   brand: {
     subtitle: "Fleet control",
@@ -209,6 +210,7 @@ const fr: Dict = {
     compliance: "Conformité",
     alerts: "Alertes",
     suggestions: "Suggestions",
+    wiki: "Wiki",
   },
   brand: {
     subtitle: "Fleet control",
@@ -392,6 +394,7 @@ const es: Dict = {
     compliance: "Cumplimiento",
     alerts: "Alertas",
     suggestions: "Sugerencias",
+    wiki: "Wiki",
   },
   brand: {
     subtitle: "Fleet control",

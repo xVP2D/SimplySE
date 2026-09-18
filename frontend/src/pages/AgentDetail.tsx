@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, type Agent, type AvcEventHit, type Command, type CorrelatedEvent, type SelinuxState } from "../lib/api";
 import { DeployRuleDialog } from "../components/DeployRuleDialog";
 import { formatPayload, statusTagClass } from "../lib/commandFormat";
+import { explainDenial } from "../lib/explainDenial";
 import { randomUUID } from "../lib/uuid";
 import { useTranslation } from "../i18n";
 
@@ -471,7 +472,12 @@ export function AgentDetail() {
                 <tr key={i} style={{ cursor: "pointer" }} onClick={() => toggleDenial(i, d)}>
                   <td style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>{new Date(d.timestamp).toLocaleTimeString(locale)}</td>
                   <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12 }}>
-                    {d.scontext} → {d.tcontext}
+                    <div>
+                      {d.scontext} → {d.tcontext}
+                    </div>
+                    <div style={{ fontFamily: "var(--font-body, inherit)", fontSize: 11, color: "var(--color-neutral-500)", marginTop: 2 }}>
+                      {explainDenial(d, locale)}
+                    </div>
                   </td>
                   <td style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12, color: "var(--color-neutral-400)" }}>
                     {d.tclass} · {d.perms.join(",")}
