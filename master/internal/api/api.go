@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"console-selinux/master/internal/rules"
 	"console-selinux/master/internal/server"
@@ -60,6 +61,8 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/agents/{id}/selinux", a.getAgentSelinux)
 	mux.HandleFunc("GET /api/denials", a.listDenials)
 	mux.HandleFunc("GET /api/denials/top", a.topSignatures)
+	mux.HandleFunc("GET /api/denials/matrix", a.denialMatrix)
+	mux.HandleFunc("GET /api/denials/trend", a.denialTrend)
 	mux.HandleFunc("POST /api/rules/deploy", a.deployRule)
 	mux.HandleFunc("GET /api/commands/{id}", a.getCommand)
 	mux.HandleFunc("GET /api/commands/recent", a.listRecentCommands)
@@ -246,6 +249,48 @@ func (a *API) listDenials(w http.ResponseWriter, r *http.Request) {
 func (a *API) topSignatures(w http.ResponseWriter, r *http.Request) {
 	limit := parseLimit(r, 10)
 	writeJSON(w, http.StatusOK, a.Rules.TopSignatures(limit))
+}
+
+// denialMatrix aggregates AVC events fleet-wide by (scontext, tcontext,
+// tclass), ordered by how many distinct agents hit each signature — see
+// opensearch.Store.Matrix. ?days= bounds the window (default 30, 0 means
+// "all history").
+func (a *API) denialMatrix(w http.ResponseWriter, r *http.Request) {
+	days := parseNonNegativeInt(r, "days", 30)
+	var sinceUnix int64
+	if days > 0 {
+		sinceUnix = time.Now().AddDate(0, 0, -days).Unix()
+	}
+	rows, err := a.Search.Matrix(r.Context(), opensearch.MatrixOptions{
+		SinceUnix: sinceUnix,
+		Limit:     parseLimit(r, 50),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
+// denialTrend returns a per-agent, per-day denial count over the window
+// (default last 14 days) — plotted as a small sparkline per host on the
+// dashboard to catch a regression right after a policy/boolean change.
+func (a *API) denialTrend(w http.ResponseWriter, r *http.Request) {
+	days := parseNonNegativeInt(r, "days", 14)
+	if days <= 0 {
+		days = 14
+	}
+	now := time.Now()
+	points, err := a.Search.Trend(r.Context(), opensearch.TrendOptions{
+		SinceUnix: now.AddDate(0, 0, -days).Unix(),
+		UntilUnix: now.Unix(),
+		AgentID:   r.URL.Query().Get("agent_id"),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, points)
 }
 
 type deployRuleRequest struct {

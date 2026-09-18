@@ -160,3 +160,228 @@ func (s *Store) Search(ctx context.Context, opts SearchOptions) (SearchResult, e
 	}
 	return SearchResult{Events: events, Total: parsed.Hits.Total.Value}, nil
 }
+
+// runAggregation POSTs body to _search and decodes the raw aggregations
+// object into out — shared by Matrix and Trend below, which each define
+// their own concrete shape for it. Treats a missing index (no AVC events
+// indexed yet) as "no results" rather than an error, same as Search.
+func (s *Store) runAggregation(ctx context.Context, body map[string]any, out any) error {
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal aggregation query: %w", err)
+	}
+	req := opensearchapi.SearchRequest{
+		Index: []string{indexName},
+		Body:  bytes.NewReader(encoded),
+	}
+	res, err := req.Do(ctx, s.client)
+	if err != nil {
+		return fmt.Errorf("run aggregation: %w", err)
+	}
+	defer res.Body.Close()
+	if res.IsError() {
+		if res.StatusCode == 404 || strings.Contains(res.String(), "index_not_found_exception") {
+			return nil
+		}
+		return fmt.Errorf("run aggregation: opensearch returned %s", res.Status())
+	}
+	if err := json.NewDecoder(res.Body).Decode(out); err != nil {
+		return fmt.Errorf("decode aggregation response: %w", err)
+	}
+	return nil
+}
+
+// MatrixRow is one (scontext, tcontext, tclass) signature observed across
+// the fleet in the queried window, with which agents hit it — the point
+// being to spot at a glance whether a denial is isolated to one host
+// (probably a one-off, host-specific issue) or spans several (a sign a
+// policy/boolean change is needed fleet-wide rather than per host).
+type MatrixRow struct {
+	SContext   string   `json:"scontext"`
+	TContext   string   `json:"tcontext"`
+	TClass     string   `json:"tclass"`
+	Perms      []string `json:"perms"`
+	Count      int      `json:"count"`
+	AgentCount int      `json:"agent_count"`
+	Agents     []string `json:"agents"`
+}
+
+type MatrixOptions struct {
+	SinceUnix int64 // 0 means no time filter (all history)
+	Limit     int   // 0 means the default below
+}
+
+// Matrix aggregates AVC events into MatrixRows, ordered by how many
+// distinct agents hit each signature (descending) — the rows most worth a
+// fleet-wide policy fix sort first, regardless of raw occurrence count.
+func (s *Store) Matrix(ctx context.Context, opts MatrixOptions) ([]MatrixRow, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	query := any(map[string]any{"match_all": map[string]any{}})
+	if opts.SinceUnix > 0 {
+		query = map[string]any{"range": map[string]any{"ts_unix": map[string]any{"gte": opts.SinceUnix}}}
+	}
+
+	body := map[string]any{
+		"size":  0,
+		"query": query,
+		"aggs": map[string]any{
+			"matrix": map[string]any{
+				"multi_terms": map[string]any{
+					"terms": []map[string]any{
+						{"field": "scontext.keyword"},
+						{"field": "tcontext.keyword"},
+						{"field": "tclass.keyword"},
+					},
+					"size":  limit,
+					"order": map[string]any{"agent_count": "desc"},
+				},
+				"aggs": map[string]any{
+					"agent_count": map[string]any{"cardinality": map[string]any{"field": "agent_id.keyword"}},
+					"agents":      map[string]any{"terms": map[string]any{"field": "agent_id.keyword", "size": 50}},
+					"perms":       map[string]any{"terms": map[string]any{"field": "perms.keyword", "size": 20}},
+				},
+			},
+		},
+	}
+
+	var parsed struct {
+		Aggregations struct {
+			Matrix struct {
+				Buckets []struct {
+					Key        []string `json:"key"`
+					DocCount   int      `json:"doc_count"`
+					AgentCount struct {
+						Value int `json:"value"`
+					} `json:"agent_count"`
+					Agents struct {
+						Buckets []struct {
+							Key string `json:"key"`
+						} `json:"buckets"`
+					} `json:"agents"`
+					Perms struct {
+						Buckets []struct {
+							Key string `json:"key"`
+						} `json:"buckets"`
+					} `json:"perms"`
+				} `json:"buckets"`
+			} `json:"matrix"`
+		} `json:"aggregations"`
+	}
+	if err := s.runAggregation(ctx, body, &parsed); err != nil {
+		return nil, err
+	}
+
+	rows := make([]MatrixRow, 0, len(parsed.Aggregations.Matrix.Buckets))
+	for _, b := range parsed.Aggregations.Matrix.Buckets {
+		if len(b.Key) != 3 {
+			continue
+		}
+		agents := make([]string, 0, len(b.Agents.Buckets))
+		for _, a := range b.Agents.Buckets {
+			agents = append(agents, a.Key)
+		}
+		perms := make([]string, 0, len(b.Perms.Buckets))
+		for _, p := range b.Perms.Buckets {
+			perms = append(perms, p.Key)
+		}
+		rows = append(rows, MatrixRow{
+			SContext:   b.Key[0],
+			TContext:   b.Key[1],
+			TClass:     b.Key[2],
+			Perms:      perms,
+			Count:      b.DocCount,
+			AgentCount: b.AgentCount.Value,
+			Agents:     agents,
+		})
+	}
+	return rows, nil
+}
+
+// TrendPoint is one agent's denial count for one UTC day — enough to plot
+// a per-host sparkline and spot a regression (a sudden jump right after a
+// policy/boolean change went out, for instance).
+type TrendPoint struct {
+	AgentID string `json:"agent_id"`
+	DayUnix int64  `json:"day_unix"`
+	Count   int    `json:"count"`
+}
+
+type TrendOptions struct {
+	SinceUnix int64  // start of the window (inclusive)
+	UntilUnix int64  // end of the window (inclusive) — defaults to now if 0
+	AgentID   string // "" means all agents
+}
+
+const daySeconds = 86400
+
+// Trend returns one TrendPoint per (agent, day) in [SinceUnix, UntilUnix],
+// including zero-count days — callers need those to tell "no data yet"
+// apart from "a gap", and to render a fixed-width sparkline.
+func (s *Store) Trend(ctx context.Context, opts TrendOptions) ([]TrendPoint, error) {
+	since := opts.SinceUnix
+	until := opts.UntilUnix
+	if until == 0 {
+		until = time.Now().Unix()
+	}
+
+	var filters []map[string]any
+	filters = append(filters, map[string]any{"range": map[string]any{"ts_unix": map[string]any{"gte": since, "lte": until}}})
+	if opts.AgentID != "" {
+		filters = append(filters, map[string]any{"term": map[string]any{"agent_id.keyword": opts.AgentID}})
+	}
+
+	body := map[string]any{
+		"size":  0,
+		"query": map[string]any{"bool": map[string]any{"filter": filters}},
+		"aggs": map[string]any{
+			"by_agent": map[string]any{
+				"terms": map[string]any{"field": "agent_id.keyword", "size": 50},
+				"aggs": map[string]any{
+					"by_day": map[string]any{
+						"histogram": map[string]any{
+							"field":           "ts_unix",
+							"interval":        daySeconds,
+							"min_doc_count":   0,
+							"extended_bounds": map[string]any{"min": since, "max": until},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	var parsed struct {
+		Aggregations struct {
+			ByAgent struct {
+				Buckets []struct {
+					Key   string `json:"key"`
+					ByDay struct {
+						Buckets []struct {
+							Key      float64 `json:"key"`
+							DocCount int     `json:"doc_count"`
+						} `json:"buckets"`
+					} `json:"by_day"`
+				} `json:"buckets"`
+			} `json:"by_agent"`
+		} `json:"aggregations"`
+	}
+	if err := s.runAggregation(ctx, body, &parsed); err != nil {
+		return nil, err
+	}
+
+	points := []TrendPoint{} // never nil: encodes to `[]`, not `null`, when empty
+	for _, agentBucket := range parsed.Aggregations.ByAgent.Buckets {
+		for _, dayBucket := range agentBucket.ByDay.Buckets {
+			points = append(points, TrendPoint{
+				AgentID: agentBucket.Key,
+				DayUnix: int64(dayBucket.Key),
+				Count:   dayBucket.DocCount,
+			})
+		}
+	}
+	return points, nil
+}

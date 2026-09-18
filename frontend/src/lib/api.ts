@@ -54,6 +54,22 @@ export interface DenialSearchResult {
   total: number;
 }
 
+export interface MatrixRow {
+  scontext: string;
+  tcontext: string;
+  tclass: string;
+  perms: string[];
+  count: number;
+  agent_count: number;
+  agents: string[];
+}
+
+export interface TrendPoint {
+  agent_id: string;
+  day_unix: number;
+  count: number;
+}
+
 export interface CommandSearchResult {
   commands: Command[];
   total: number;
@@ -124,6 +140,18 @@ export const api = {
     return request<DenialSearchResult>(`/denials?${qs.toString()}`);
   },
   topSignatures: (limit = 10) => request<TopSignature[]>(`/denials/top?limit=${limit}`),
+  denialMatrix: (params: { days?: number; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.days !== undefined) qs.set("days", String(params.days));
+    if (params.limit) qs.set("limit", String(params.limit));
+    return request<MatrixRow[]>(`/denials/matrix?${qs.toString()}`);
+  },
+  denialTrend: (params: { agentId?: string; days?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.agentId) qs.set("agent_id", params.agentId);
+    if (params.days !== undefined) qs.set("days", String(params.days));
+    return request<TrendPoint[]>(`/denials/trend?${qs.toString()}`);
+  },
   recentCommands: (params: { agentId?: string; status?: string; offset?: number; limit?: number } = {}) => {
     const qs = new URLSearchParams();
     if (params.agentId) qs.set("agent_id", params.agentId);

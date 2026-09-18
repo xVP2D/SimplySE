@@ -5,6 +5,7 @@ const navItems = [
   { to: "/", icon: "ph-gauge", key: "nav.dashboard", end: true },
   { to: "/agents", icon: "ph-desktop-tower", key: "nav.agents" },
   { to: "/denials", icon: "ph-warning-octagon", key: "nav.denials" },
+  { to: "/matrix", icon: "ph-grid-nine", key: "nav.matrix" },
   { to: "/deployments", icon: "ph-upload-simple", key: "nav.deployments" },
   { to: "/compliance", icon: "ph-shield-check", key: "nav.compliance" },
   { to: "/alerts", icon: "ph-bell", key: "nav.alerts" },
