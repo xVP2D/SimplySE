@@ -55,9 +55,18 @@ function WidgetFrame({
       }}
     >
       {(title || headerAction || editMode) && (
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8.4 }}>
-          {title ? <h5 style={{ margin: 0, fontSize: 15 }}>{title}</h5> : <span />}
-          <div style={{ display: "flex", alignItems: "center", gap: 8.4 }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8.4, minWidth: 0 }}>
+          {title ? (
+            <h5
+              style={{ margin: 0, fontSize: 15, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+              title={title}
+            >
+              {title}
+            </h5>
+          ) : (
+            <span />
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 8.4, flex: "none" }}>
             {!editMode && headerAction}
             {editMode && onLimitChange && (
               <input
@@ -162,7 +171,8 @@ export function Dashboard() {
     };
   }, []);
 
-  const complianceScore = fleetScore(evaluateFleet(agents, allOpenAlerts));
+  const complianceResults = evaluateFleet(agents, allOpenAlerts);
+  const complianceScore = fleetScore(complianceResults);
   const data: DashboardData = {
     agents,
     topSignatures,
@@ -170,6 +180,7 @@ export function Dashboard() {
     openAlerts: allOpenAlerts,
     openAlertsTotal,
     complianceScore,
+    complianceResults,
     trend,
   };
 
@@ -235,6 +246,49 @@ export function Dashboard() {
     setShowCatalog(false);
   };
 
+  // A random dashboard: a random subset of the catalog in random order,
+  // each with a random size around its default, packed left-to-right in
+  // rows (wrapping when a widget no longer fits in the 12 columns) so no
+  // two widgets can overlap.
+  const randomizeLayout = () => {
+    const randomInt = (min: number, max: number) => min + Math.floor(Math.random() * (max - min + 1));
+    const shuffled = [...WIDGET_CATALOG];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    const chosen = shuffled.slice(0, randomInt(5, WIDGET_CATALOG.length));
+
+    let cursorX = 0;
+    let cursorY = 0;
+    let rowHeight = 0;
+    const next: WidgetInstance[] = chosen.map((type) => {
+      const def = WIDGET_DEFS[type];
+      const w = Math.min(GRID_COLS, randomInt(def.minSize.w, Math.max(def.minSize.w, def.defaultSize.w + 2)));
+      const h = randomInt(def.minSize.h, def.defaultSize.h + 2);
+      if (cursorX + w > GRID_COLS) {
+        cursorX = 0;
+        cursorY += rowHeight;
+        rowHeight = 0;
+      }
+      const widget: WidgetInstance = {
+        id: randomUUID(),
+        type,
+        x: cursorX,
+        y: cursorY,
+        w,
+        h,
+        limit: def.hasLimit ? randomInt(3, 20) : undefined,
+      };
+      cursorX += w;
+      rowHeight = Math.max(rowHeight, h);
+      return widget;
+    });
+
+    setWidgets(next);
+    setShowCatalog(false);
+  };
+
   const removeWidget = (id: string) => setWidgets((prev) => prev.filter((w) => w.id !== id));
 
   const setWidgetLimit = (id: string, limit: number) =>
@@ -254,6 +308,9 @@ export function Dashboard() {
             <span style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>
               {saveState === "saving" ? t("dashboard.savingLayout") : saveState === "saved" ? t("dashboard.layoutSaved") : ""}
             </span>
+            <button type="button" className="btn btn-secondary" onClick={randomizeLayout} title={t("dashboard.randomizeHint")}>
+              <i className="ph ph-shuffle" /> {t("dashboard.randomize")}
+            </button>
             <div style={{ position: "relative" }}>
               <button type="button" className="btn btn-secondary" onClick={() => setShowCatalog((v) => !v)}>
                 <i className="ph ph-plus" /> {t("dashboard.addWidget")}

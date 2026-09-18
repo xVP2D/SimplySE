@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Agent, Alert, Command, TopSignature, TrendPoint } from "./api";
+import type { AgentCompliance } from "./compliance";
 
 export type WidgetType =
   | "stat-agents"
@@ -13,7 +14,9 @@ export type WidgetType =
   | "recent-deployments"
   | "open-alerts"
   | "denial-trend"
-  | "agents-vignettes";
+  | "agents-vignettes"
+  | "compliance-checks"
+  | "agents-by-mode";
 
 // Everything the widget grid needs to render any widget instance — fetched
 // once by the Dashboard page (same polling loop as before this became
@@ -26,6 +29,7 @@ export interface DashboardData {
   openAlerts: Alert[];
   openAlertsTotal: number;
   complianceScore: number;
+  complianceResults: AgentCompliance[];
   trend: TrendPoint[];
 }
 
@@ -85,6 +89,18 @@ export const WIDGET_DEFS: Record<WidgetType, WidgetDef> = {
     hasLimit: true,
     defaultLimit: 12,
   },
+  "compliance-checks": {
+    type: "compliance-checks",
+    labelKey: "dashboard.widgets.complianceChecks",
+    defaultSize: { w: 6, h: 6 },
+    minSize: { w: 3, h: 4 },
+  },
+  "agents-by-mode": {
+    type: "agents-by-mode",
+    labelKey: "dashboard.widgets.agentsByMode",
+    defaultSize: { w: 6, h: 6 },
+    minSize: { w: 3, h: 4 },
+  },
 };
 
 export const WIDGET_CATALOG: WidgetType[] = [
@@ -99,6 +115,8 @@ export const WIDGET_CATALOG: WidgetType[] = [
   "open-alerts",
   "denial-trend",
   "agents-vignettes",
+  "compliance-checks",
+  "agents-by-mode",
 ];
 
 // A local widget instance: the grid-agnostic shape used throughout the
@@ -129,6 +147,8 @@ export const DEFAULT_WIDGETS: WidgetInstance[] = [
   { id: "default-open-alerts", type: "open-alerts", x: 8, y: 8, w: 4, h: 8, limit: 6 },
   { id: "default-denial-trend", type: "denial-trend", x: 0, y: 16, w: 6, h: 8 },
   { id: "default-agents-vignettes", type: "agents-vignettes", x: 6, y: 16, w: 6, h: 8, limit: 12 },
+  { id: "default-compliance-checks", type: "compliance-checks", x: 0, y: 24, w: 6, h: 6 },
+  { id: "default-agents-by-mode", type: "agents-by-mode", x: 6, y: 24, w: 6, h: 6 },
 ];
 
 export function statusTagClass(status: string): string {
@@ -144,21 +164,58 @@ export function statusTagClass(status: string): string {
   }
 }
 
+const singleLine: React.CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+
 export function StatCard({ label, value, meta }: { label: string; value: string | number; meta: string }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 5.6, height: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 5.6, height: "100%", minWidth: 0 }}>
       <span
         style={{
+          ...singleLine,
           fontSize: 10,
           letterSpacing: "0.1em",
           textTransform: "uppercase",
           color: "var(--color-accent)",
         }}
+        title={label}
       >
         {label}
       </span>
-      <span style={{ fontFamily: "var(--font-heading)", fontSize: 30, lineHeight: 1 }}>{value}</span>
-      <span style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>{meta}</span>
+      <span style={{ ...singleLine, fontFamily: "var(--font-heading)", fontSize: 30, lineHeight: 1 }}>{value}</span>
+      <span style={{ ...singleLine, fontSize: 12, color: "var(--color-neutral-500)" }} title={meta}>
+        {meta}
+      </span>
+    </div>
+  );
+}
+
+// A hand-drawn horizontal bar list — same "no charting library" call as
+// the trend line chart, for a categorical breakdown (a handful of named
+// parameters, each with a magnitude) rather than a series over time.
+// Single hue, thin recessive track, rounded ends, single-line labels.
+function HorizontalBarChart({
+  bars,
+}: {
+  bars: { label: string; value: number; total: number; displayValue: string }[];
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 11.2, height: "100%" }}>
+      {bars.map((b) => {
+        const pct = b.total > 0 ? Math.max(0, Math.min(100, Math.round((b.value / b.total) * 100))) : 0;
+        return (
+          <div key={b.label} style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8.4, fontSize: 12.5 }}>
+              <span style={{ ...singleLine, minWidth: 0 }} title={b.label}>
+                {b.label}
+              </span>
+              <span style={{ color: "var(--color-neutral-500)", flex: "none" }}>{b.displayValue}</span>
+            </div>
+            <div style={{ height: 6, borderRadius: 3, background: "var(--color-divider)", overflow: "hidden" }}>
+              <div style={{ width: `${pct}%`, height: "100%", borderRadius: 3, background: "var(--color-accent)" }} />
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -367,7 +424,7 @@ export function renderWidgetContent(
   t: (key: string, vars?: Record<string, string | number>) => string,
   locale: string,
 ): { title?: string; body: React.ReactNode; headerAction?: React.ReactNode; scrollable?: boolean } {
-  const { agents, topSignatures, recentCommands, openAlerts, openAlertsTotal, complianceScore, trend } = data;
+  const { agents, topSignatures, recentCommands, openAlerts, openAlertsTotal, complianceScore, complianceResults, trend } = data;
 
   switch (widget.type) {
     case "stat-agents": {
@@ -589,6 +646,48 @@ export function renderWidgetContent(
         title: t("dashboard.agentsVignettesTitle"),
         scrollable: true,
         body: <AgentsVignettesGrid agents={rows} emptyLabel={t("agents.empty")} />,
+      };
+    }
+    case "compliance-checks": {
+      const checkIds = ["enforcing", "connected", "policy", "no_open_alerts"] as const;
+      const checkLabelKeys: Record<(typeof checkIds)[number], string> = {
+        enforcing: "dashboard.checkEnforcing",
+        connected: "dashboard.checkConnected",
+        policy: "dashboard.checkPolicy",
+        no_open_alerts: "dashboard.checkNoOpenAlerts",
+      };
+      const bars = checkIds.map((id) => {
+        let applicable = 0;
+        let passed = 0;
+        for (const r of complianceResults) {
+          const c = r.checks.find((check) => check.id === id);
+          if (!c || c.status === "unknown") continue;
+          applicable++;
+          if (c.status === "pass") passed++;
+        }
+        return { label: t(checkLabelKeys[id]), value: passed, total: applicable, displayValue: `${passed}/${applicable}` };
+      });
+      return {
+        title: t("dashboard.complianceChecksTitle"),
+        body: <HorizontalBarChart bars={bars} />,
+      };
+    }
+    case "agents-by-mode": {
+      const counts = { enforcing: 0, permissive: 0, disabled: 0, unknown: 0 };
+      for (const a of agents) {
+        if (a.mode === "enforcing" || a.mode === "permissive" || a.mode === "disabled") counts[a.mode]++;
+        else counts.unknown++;
+      }
+      const total = agents.length;
+      const bars = (["enforcing", "permissive", "disabled", "unknown"] as const).map((mode) => ({
+        label: mode,
+        value: counts[mode],
+        total,
+        displayValue: String(counts[mode]),
+      }));
+      return {
+        title: t("dashboard.agentsByModeTitle"),
+        body: <HorizontalBarChart bars={bars} />,
       };
     }
   }
