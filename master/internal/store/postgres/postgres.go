@@ -273,6 +273,7 @@ type Alert struct {
 	SContext       string     `json:"scontext"`
 	TContext       string     `json:"tcontext"`
 	TClass         string     `json:"tclass"`
+	Severity       string     `json:"severity"`
 	Status         string     `json:"status"`
 	CreatedAt      time.Time  `json:"created_at"`
 	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
@@ -280,10 +281,14 @@ type Alert struct {
 }
 
 func (s *Store) CreateAlert(ctx context.Context, a Alert) error {
+	severity := a.Severity
+	if severity == "" {
+		severity = "medium"
+	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO alerts (type, title, message, agent_id, scontext, tcontext, tclass)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, a.Type, a.Title, a.Message, a.AgentID, a.SContext, a.TContext, a.TClass)
+		INSERT INTO alerts (type, title, message, agent_id, scontext, tcontext, tclass, severity)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, a.Type, a.Title, a.Message, a.AgentID, a.SContext, a.TContext, a.TClass, severity)
 	if err != nil {
 		return fmt.Errorf("create alert: %w", err)
 	}
@@ -293,9 +298,10 @@ func (s *Store) CreateAlert(ctx context.Context, a Alert) error {
 // ListAlertsOptions filters and paginates the alert center. Status is an
 // exact match ("open" or "acknowledged"); left empty, all alerts match.
 type ListAlertsOptions struct {
-	Status string
-	Offset int
-	Limit  int
+	Status   string
+	Severity string
+	Offset   int
+	Limit    int
 }
 
 type ListAlertsResult struct {
@@ -305,13 +311,13 @@ type ListAlertsResult struct {
 
 func (s *Store) ListAlerts(ctx context.Context, opts ListAlertsOptions) (ListAlertsResult, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, type, title, message, agent_id, scontext, tcontext, tclass, status,
+		SELECT id, type, title, message, agent_id, scontext, tcontext, tclass, severity, status,
 			created_at, acknowledged_at, acknowledged_by, count(*) OVER() AS total
 		FROM alerts
-		WHERE ($1 = '' OR status = $1)
+		WHERE ($1 = '' OR status = $1) AND ($2 = '' OR severity = $2)
 		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3
-	`, opts.Status, opts.Limit, opts.Offset)
+		LIMIT $3 OFFSET $4
+	`, opts.Status, opts.Severity, opts.Limit, opts.Offset)
 	if err != nil {
 		return ListAlertsResult{}, fmt.Errorf("list alerts: %w", err)
 	}
@@ -321,7 +327,7 @@ func (s *Store) ListAlerts(ctx context.Context, opts ListAlertsOptions) (ListAle
 	for rows.Next() {
 		var a Alert
 		if err := rows.Scan(&a.ID, &a.Type, &a.Title, &a.Message, &a.AgentID, &a.SContext, &a.TContext, &a.TClass,
-			&a.Status, &a.CreatedAt, &a.AcknowledgedAt, &a.AcknowledgedBy, &result.Total); err != nil {
+			&a.Severity, &a.Status, &a.CreatedAt, &a.AcknowledgedAt, &a.AcknowledgedBy, &result.Total); err != nil {
 			return ListAlertsResult{}, fmt.Errorf("scan alert: %w", err)
 		}
 		result.Alerts = append(result.Alerts, a)

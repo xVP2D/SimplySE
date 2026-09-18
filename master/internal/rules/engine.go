@@ -19,6 +19,51 @@ import (
 // keep this first pass predictable.
 var thresholds = []int{10, 50, 100, 500}
 
+// criticalTypes marks SELinux domain/type names whose denials get raised
+// as "high" severity regardless of how often they've occurred — a single
+// denial against sshd/httpd/sudo/etc. is worth an operator's attention
+// immediately, unlike a run-of-the-mill unconfined-domain denial. Not
+// exhaustive (there's no single canonical list across distros/policies);
+// extend as needed. Deliberately excludes types so broad they'd make this
+// meaningless (e.g. unconfined_t, kernel_t, init_t alone).
+var criticalTypes = map[string]bool{
+	"sshd_t":           true,
+	"httpd_t":          true,
+	"sudo_t":           true,
+	"su_t":             true,
+	"crond_t":          true,
+	"named_t":          true,
+	"dhcpd_t":          true,
+	"postgresql_t":     true,
+	"mysqld_t":         true,
+	"auditd_t":         true,
+	"sysadm_t":         true,
+	"NetworkManager_t": true,
+}
+
+// typeFromContext extracts the SELinux type from a full context string
+// (user:role:type:level[:categories]) — the middle-ish field that actually
+// identifies "what this is" (sshd, httpd, ...), unlike the user/role/level
+// fields which are mostly constant (system_u/system_r/s0) in a targeted
+// policy.
+func typeFromContext(ctx string) string {
+	parts := strings.Split(ctx, ":")
+	if len(parts) >= 3 {
+		return parts[2]
+	}
+	return ctx
+}
+
+// severityFor returns "high" if either side of the denial touches a known
+// critical service type, "medium" otherwise. Two levels only for now —
+// deliberately simple and explainable, like the rest of this package.
+func severityFor(o Observation) string {
+	if criticalTypes[typeFromContext(o.SContext)] || criticalTypes[typeFromContext(o.TContext)] {
+		return "high"
+	}
+	return "medium"
+}
+
 type Engine struct {
 	mu    sync.Mutex
 	stats map[string]*signatureStat
@@ -61,6 +106,7 @@ type Alert struct {
 	SContext string
 	TContext string
 	TClass   string
+	Severity string // low | medium | high — see severityFor
 }
 
 func (e *Engine) Observe(o Observation) []Alert {
@@ -68,6 +114,7 @@ func (e *Engine) Observe(o Observation) []Alert {
 	defer e.mu.Unlock()
 
 	var alerts []Alert
+	severity := severityFor(o)
 
 	k := key(o)
 	s, ok := e.stats[k]
@@ -89,6 +136,7 @@ func (e *Engine) Observe(o Observation) []Alert {
 			SContext: o.SContext,
 			TContext: o.TContext,
 			TClass:   o.TClass,
+			Severity: severity,
 		})
 	}
 	s.Count++
@@ -108,6 +156,7 @@ func (e *Engine) Observe(o Observation) []Alert {
 				SContext: o.SContext,
 				TContext: o.TContext,
 				TClass:   o.TClass,
+				Severity: severity,
 			})
 		}
 	}

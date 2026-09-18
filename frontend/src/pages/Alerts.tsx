@@ -9,6 +9,7 @@ export function Alerts() {
   const { t, locale } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const status = searchParams.get("status") ?? "open";
+  const severity = searchParams.get("severity") ?? "";
 
   const [offset, setOffset] = useState(0);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -19,12 +20,12 @@ export function Alerts() {
 
   useEffect(() => {
     setOffset(0);
-  }, [status]);
+  }, [status, severity]);
 
   const load = () => {
     setLoading(true);
     api
-      .listAlerts({ status: status || undefined, offset, limit: PAGE_SIZE })
+      .listAlerts({ status: status || undefined, severity: severity || undefined, offset, limit: PAGE_SIZE })
       .then((result) => {
         setAlerts(result.alerts ?? []);
         setTotal(result.total);
@@ -39,7 +40,7 @@ export function Alerts() {
     const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, offset]);
+  }, [status, severity, offset]);
 
   const setStatusFilter = (value: string) => {
     setSearchParams((prev) => {
@@ -48,6 +49,37 @@ export function Alerts() {
       else next.delete("status");
       return next;
     });
+  };
+
+  const setSeverityFilter = (value: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value) next.set("severity", value);
+      else next.delete("severity");
+      return next;
+    });
+  };
+
+  const severityTagClass = (sev: string) => {
+    switch (sev) {
+      case "high":
+        return "tag tag-outline";
+      case "low":
+        return "tag tag-neutral";
+      default:
+        return "tag tag-accent-2";
+    }
+  };
+
+  const severityLabel = (sev: string) => {
+    switch (sev) {
+      case "high":
+        return t("alerts.severityHigh");
+      case "low":
+        return t("alerts.severityLow");
+      default:
+        return t("alerts.severityMedium");
+    }
   };
 
   const acknowledge = async (id: string) => {
@@ -91,6 +123,12 @@ export function Alerts() {
             </label>
           ))}
         </div>
+        <select className="input" style={{ width: 160 }} value={severity} onChange={(e) => setSeverityFilter(e.target.value)}>
+          <option value="">{t("alerts.allSeverities")}</option>
+          <option value="high">{t("alerts.severityHigh")}</option>
+          <option value="medium">{t("alerts.severityMedium")}</option>
+          <option value="low">{t("alerts.severityLow")}</option>
+        </select>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--color-neutral-500)" }}>
           {loading ? t("common.loading") : total > 0 ? t("common.resultsRange", { from, to, total }) : t("common.noResults")}
         </span>
@@ -113,11 +151,16 @@ export function Alerts() {
             }}
           >
             <i
-              className={`ph ${a.type === "threshold" ? "ph-chart-line-up" : "ph-sparkle"}`}
+              className={`ph ${
+                a.type === "mode_permissive" ? "ph-shield-warning" : a.type === "threshold" ? "ph-chart-line-up" : "ph-sparkle"
+              }`}
               style={{ fontSize: 18, color: "var(--color-accent)", marginTop: 2 }}
             />
             <div style={{ display: "flex", flexDirection: "column", gap: 2.8, minWidth: 0, flex: 1 }}>
-              <span style={{ fontSize: 14 }}>{a.title}</span>
+              <span style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 8.4 }}>
+                {a.title}
+                <span className={severityTagClass(a.severity)}>{severityLabel(a.severity)}</span>
+              </span>
               <span style={{ fontSize: 12.5, color: "var(--color-neutral-400)" }}>{a.message}</span>
               <span style={{ fontSize: 11, color: "var(--color-neutral-600)" }}>
                 <Link to={`/agents/${a.agent_id}`}>{a.agent_id}</Link> · {new Date(a.created_at).toLocaleString(locale)}

@@ -85,6 +85,7 @@ export interface Alert {
   scontext: string;
   tcontext: string;
   tclass: string;
+  severity: "low" | "medium" | "high" | string;
   status: "open" | "acknowledged" | string;
   created_at: string;
   acknowledged_at?: string;
@@ -132,9 +133,10 @@ export const api = {
     return request<CommandSearchResult>(`/commands/recent?${qs.toString()}`);
   },
   getCommand: (id: string) => request<Command>(`/commands/${id}`),
-  listAlerts: (params: { status?: string; offset?: number; limit?: number } = {}) => {
+  listAlerts: (params: { status?: string; severity?: string; offset?: number; limit?: number } = {}) => {
     const qs = new URLSearchParams();
     if (params.status) qs.set("status", params.status);
+    if (params.severity) qs.set("severity", params.severity);
     if (params.offset) qs.set("offset", String(params.offset));
     qs.set("limit", String(params.limit ?? 20));
     return request<AlertSearchResult>(`/alerts?${qs.toString()}`);

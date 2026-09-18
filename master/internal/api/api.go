@@ -385,9 +385,10 @@ func (a *API) listRecentCommands(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) listAlerts(w http.ResponseWriter, r *http.Request) {
 	result, err := a.Store.ListAlerts(r.Context(), postgres.ListAlertsOptions{
-		Status: r.URL.Query().Get("status"),
-		Offset: parseNonNegativeInt(r, "offset", 0),
-		Limit:  parseLimit(r, 20),
+		Status:   r.URL.Query().Get("status"),
+		Severity: r.URL.Query().Get("severity"),
+		Offset:   parseNonNegativeInt(r, "offset", 0),
+		Limit:    parseLimit(r, 20),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)

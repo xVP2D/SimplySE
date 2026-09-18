@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -114,7 +115,25 @@ func run(log *slog.Logger) error {
 	hub := server.NewHub()
 
 	if err := queue.ConsumeHeartbeats(ctx, func(m natsq.HeartbeatMsg) error {
-		return pg.UpdateHeartbeat(ctx, m.AgentID, m.Mode, m.PolicyName, m.PolicyVersion)
+		// Fetched before the update so it reflects the mode as of the
+		// *previous* heartbeat (or enrollment) — the only way to detect a
+		// transition rather than just the current snapshot.
+		prev, prevErr := pg.GetAgent(ctx, m.AgentID)
+		if err := pg.UpdateHeartbeat(ctx, m.AgentID, m.Mode, m.PolicyName, m.PolicyVersion); err != nil {
+			return err
+		}
+		if prevErr == nil && prev.Mode != "permissive" && m.Mode == "permissive" {
+			if err := pg.CreateAlert(ctx, postgres.Alert{
+				Type:     "mode_permissive",
+				Title:    "Passage en mode permissive",
+				Message:  fmt.Sprintf("L'agent %s est passé en mode permissive (était %s)", m.AgentID, prev.Mode),
+				AgentID:  m.AgentID,
+				Severity: "high",
+			}); err != nil {
+				log.Error("create mode_permissive alert failed", "agent_id", m.AgentID, "error", err)
+			}
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -134,6 +153,7 @@ func run(log *slog.Logger) error {
 				SContext: alert.SContext,
 				TContext: alert.TContext,
 				TClass:   alert.TClass,
+				Severity: alert.Severity,
 			}); err != nil {
 				log.Error("create alert failed", "type", alert.Type, "error", err)
 			}

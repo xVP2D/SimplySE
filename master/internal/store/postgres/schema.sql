@@ -53,11 +53,19 @@ CREATE TABLE IF NOT EXISTS alerts (
     scontext          TEXT NOT NULL DEFAULT '',
     tcontext          TEXT NOT NULL DEFAULT '',
     tclass            TEXT NOT NULL DEFAULT '',
+    -- low | medium | high — see rules.severityFor. Defaults to medium: an
+    -- ordinary denial worth a look but not touching a known critical
+    -- service type, and mode_permissive alerts (not run through
+    -- severityFor at all) always set 'high' explicitly.
+    severity          TEXT NOT NULL DEFAULT 'medium',
     status            TEXT NOT NULL DEFAULT 'open',
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     acknowledged_at   TIMESTAMPTZ,
     acknowledged_by   TEXT NOT NULL DEFAULT ''
 );
+-- Bootstrap runs `CREATE TABLE IF NOT EXISTS` only, so a column added after
+-- the table already exists on a live install needs its own migration line.
+ALTER TABLE alerts ADD COLUMN IF NOT EXISTS severity TEXT NOT NULL DEFAULT 'medium';
 
 CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts (status);
 CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON alerts (created_at DESC);

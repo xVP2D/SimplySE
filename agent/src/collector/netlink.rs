@@ -18,7 +18,9 @@ use tokio::sync::mpsc::Sender;
 
 const NETLINK_AUDIT: i32 = 9; // linux/netlink.h
 const AUDIT_NLGRP_READLOG_MASK: u32 = 1; // linux/audit.h: group 1 -> bit 0
+const AUDIT_USER_AVC: u16 = 1107; // linux/audit.h: userspace object managers (dbus, polkit, ...)
 const AUDIT_AVC: u16 = 1400; // linux/audit.h
+const AUDIT_SELINUX_ERR: u16 = 1415; // linux/audit.h: policy-level errors (e.g. bounded transition denied)
 
 /// Opens and binds the audit netlink socket. Returns an error (typically
 /// EPERM without `CAP_AUDIT_READ`, or ENOSYS/EAFNOSUPPORT under a sandbox
@@ -147,17 +149,21 @@ fn parse_netlink_messages(buf: &[u8]) -> Vec<(u16, &str)> {
     out
 }
 
-/// Reconstructs the same `type=AVC msg=audit(...): avc: ...` text that
-/// auditd would write to the log, from the raw netlink record — the
-/// kernel's payload for AVC records already starts with `audit(ts:serial):
-/// avc: ...`; only the `type=AVC msg=` prefix is auditd's own addition, so
-/// prepending it lets the existing text parser (see
-/// [`super::parser::parse_avc_line`]) handle both sources identically.
+/// Reconstructs the same `type=X msg=audit(...): ...` text that auditd
+/// would write to the log, from the raw netlink record — the kernel's
+/// payload already starts with `audit(ts:serial): ...`; only the
+/// `type=X msg=` prefix is auditd's own addition, so prepending the right
+/// one lets the existing text parser (see
+/// [`super::parser::parse_avc_line`]) handle all three record types (and
+/// both netlink and file-tail sources) identically.
 fn format_line(nlmsg_type: u16, payload: &str) -> Option<String> {
-    if nlmsg_type != AUDIT_AVC {
-        return None;
-    }
-    Some(format!("type=AVC msg={payload}"))
+    let type_name = match nlmsg_type {
+        AUDIT_AVC => "AVC",
+        AUDIT_USER_AVC => "USER_AVC",
+        AUDIT_SELINUX_ERR => "SELINUX_ERR",
+        _ => return None,
+    };
+    Some(format!("type={type_name} msg={payload}"))
 }
 
 #[cfg(test)]
@@ -176,6 +182,15 @@ mod tests {
     #[test]
     fn ignores_non_avc_record_types() {
         assert!(format_line(1300, "audit(1699999999.123:456): arch=c000003e").is_none());
+    }
+
+    #[test]
+    fn formats_a_selinux_err_record_into_a_line_the_text_parser_accepts() {
+        let payload = r#"audit(1699999999.123:456): op=security_compute_av reason=bounded scontext=system_u:system_r:init_t:s0 tcontext=system_u:system_r:httpd_t:s0 tclass=process perms=transition"#;
+        let line = format_line(AUDIT_SELINUX_ERR, payload).expect("SELINUX_ERR records must format");
+        let denial =
+            super::super::parser::parse_avc_line(&line).expect("should parse like a log line");
+        assert_eq!(denial.tclass, "process");
     }
 
     #[test]
