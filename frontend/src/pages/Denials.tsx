@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Agent, type AvcEventHit } from "../lib/api";
 import { useTranslation } from "../i18n";
-import { explainDenial } from "../lib/explainDenial";
+import { explainDenial, typeFromContext } from "../lib/explainDenial";
 import { useAutoRefresh } from "../lib/useAutoRefresh";
+import { CollectDomainButton } from "../components/CollectDomainButton";
 
 const PAGE_SIZE = 25;
 
@@ -28,6 +29,19 @@ export function Denials({ quarantine = false }: { quarantine?: boolean }) {
   const [reloadTick, setReloadTick] = useState(0);
   const autoTick = useAutoRefresh(5000);
   const lastQuery = useRef("");
+  // "agent_id|domain" of collections currently running or awaiting a
+  // generate click, across every agent — disables that combo's Collect
+  // button so a second run can't be started on top of it.
+  const [activeCollections, setActiveCollections] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    api
+      .listCollections({ limit: 100 })
+      .then((list) =>
+        setActiveCollections(new Set(list.filter((c) => c.status !== "done" && c.status !== "failed").map((c) => `${c.agent_id}|${c.domain}`))),
+      )
+      .catch(() => {});
+  }, [reloadTick, autoTick]);
 
   const runAction = async (d: AvcEventHit, action: () => Promise<unknown>) => {
     setBusyId(d.id);
@@ -205,7 +219,8 @@ export function Denials({ quarantine = false }: { quarantine?: boolean }) {
                 <td style={{ fontSize: 12.5, color: "var(--color-neutral-400)", maxWidth: 300, wordBreak: "break-word" }}>
                   {d.path}
                 </td>
-                <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                <td style={{ textAlign: "right" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, flexWrap: "wrap" }}>
                   {quarantine ? (
                     <button
                       type="button"
@@ -231,6 +246,15 @@ export function Denials({ quarantine = false }: { quarantine?: boolean }) {
                           {suggesting === d.id ? "…" : t("denials.fixButton")}
                         </button>
                       )}
+                      <CollectDomainButton
+                        agentId={d.agent_id}
+                        domain={typeFromContext(d.scontext)}
+                        host={agentsByID.get(d.agent_id)?.hostname || d.agent_id}
+                        disabledReason={
+                          activeCollections.has(`${d.agent_id}|${typeFromContext(d.scontext)}`) ? t("collect.alreadyRunning") : undefined
+                        }
+                        onStarted={() => setReloadTick((n) => n + 1)}
+                      />
                       <button
                         type="button"
                         className="btn btn-ghost"
@@ -244,6 +268,7 @@ export function Denials({ quarantine = false }: { quarantine?: boolean }) {
                   <button type="button" className="btn btn-ghost" disabled={busyId === d.id} onClick={() => remove(d)}>
                     {t("denials.delete")}
                   </button>
+                  </div>
                 </td>
               </tr>
             ))}
