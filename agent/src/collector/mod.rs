@@ -1,3 +1,4 @@
+mod correlate;
 mod netlink;
 mod parser;
 mod tail;
@@ -32,7 +33,8 @@ impl AuditSource {
 }
 
 /// Collects AVC denials per `source` and forwards every parsed one to
-/// `tx`. Lines/records that aren't AVC denials are silently dropped.
+/// `tx`, with the denied file's full path attached when the audit event has
+/// it. Records that aren't part of an AVC event are silently dropped.
 pub async fn run(source: AuditSource, audit_log_path: PathBuf, tx: Sender<AvcDenial>) {
     let (line_tx, mut line_rx) = tokio::sync::mpsc::channel::<String>(256);
 
@@ -55,12 +57,26 @@ pub async fn run(source: AuditSource, audit_log_path: PathBuf, tx: Sender<AvcDen
         }
     });
 
-    while let Some(line) = line_rx.recv().await {
-        if let Some(denial) = parser::parse_avc_line(&line)
-            && tx.send(denial).await.is_err()
-        {
-            break; // downstream shut down
+    // Denials wait here briefly for the rest of their audit event, so the
+    // full path of the denied file can be attached (see correlate.rs).
+    let mut correlator = correlate::Correlator::default();
+    let mut tick = tokio::time::interval(std::time::Duration::from_millis(500));
+    'outer: loop {
+        let ready = tokio::select! {
+            line = line_rx.recv() => match line {
+                Some(line) => correlator.feed(&line, std::time::Instant::now()),
+                None => break,
+            },
+            _ = tick.tick() => correlator.flush_stale(std::time::Instant::now(), std::time::Duration::from_secs(2)),
+        };
+        for denial in ready {
+            if tx.send(denial).await.is_err() {
+                break 'outer; // downstream shut down
+            }
         }
+    }
+    for denial in correlator.flush_stale(std::time::Instant::now(), std::time::Duration::ZERO) {
+        let _ = tx.send(denial).await;
     }
 
     collector_handle.abort();

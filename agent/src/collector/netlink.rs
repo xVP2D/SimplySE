@@ -21,6 +21,11 @@ const AUDIT_NLGRP_READLOG_MASK: u32 = 1; // linux/audit.h: group 1 -> bit 0
 const AUDIT_USER_AVC: u16 = 1107; // linux/audit.h: userspace object managers (dbus, polkit, ...)
 const AUDIT_AVC: u16 = 1400; // linux/audit.h
 const AUDIT_SELINUX_ERR: u16 = 1415; // linux/audit.h: policy-level errors (e.g. bounded transition denied)
+// Not denials themselves: the rest of an AVC's audit event, which the
+// correlator (see super::correlate) uses to find the denied file's full path.
+const AUDIT_CWD: u16 = 1307; // linux/audit.h
+const AUDIT_PATH: u16 = 1302; // linux/audit.h
+const AUDIT_EOE: u16 = 1320; // linux/audit.h: end of a multi-record event
 
 /// Opens and binds the audit netlink socket. Returns an error (typically
 /// EPERM without `CAP_AUDIT_READ`, or ENOSYS/EAFNOSUPPORT under a sandbox
@@ -161,6 +166,9 @@ fn format_line(nlmsg_type: u16, payload: &str) -> Option<String> {
         AUDIT_AVC => "AVC",
         AUDIT_USER_AVC => "USER_AVC",
         AUDIT_SELINUX_ERR => "SELINUX_ERR",
+        AUDIT_CWD => "CWD",
+        AUDIT_PATH => "PATH",
+        AUDIT_EOE => "EOE",
         _ => return None,
     };
     Some(format!("type={type_name} msg={payload}"))
@@ -180,8 +188,17 @@ mod tests {
     }
 
     #[test]
-    fn ignores_non_avc_record_types() {
-        assert!(format_line(1300, "audit(1699999999.123:456): arch=c000003e").is_none());
+    fn ignores_record_types_the_correlator_has_no_use_for() {
+        assert!(format_line(1300, "audit(1699999999.123:456): arch=c000003e").is_none()); // SYSCALL
+        assert!(format_line(1327, "audit(1699999999.123:456): proctitle=2F62696E").is_none()); // PROCTITLE
+    }
+
+    #[test]
+    fn keeps_the_records_that_complete_an_avc_event() {
+        for (kind, name) in [(1307u16, "CWD"), (1302, "PATH"), (1320, "EOE")] {
+            let line = format_line(kind, "audit(1699999999.123:456): x=1").expect(name);
+            assert!(line.starts_with(&format!("type={name} msg=audit(")), "{line}");
+        }
     }
 
     #[test]

@@ -210,6 +210,10 @@ func (s *Store) Search(ctx context.Context, opts SearchOptions) (SearchResult, e
 	req := opensearchapi.SearchRequest{
 		Index: readIndices(),
 		Body:  bytes.NewReader(body),
+		// OpenSearch stops counting at 10000 unless told otherwise, which
+		// made the Denials page claim "1-25 of 10000" whatever the real
+		// number (a single noisy host reaches that within minutes).
+		TrackTotalHits: true,
 		// A fresh install has no legacy avc_events index at all (only
 		// daily ones start existing); without this, searching the fixed
 		// list [avc_events, avc_events-*] 404s outright instead of just
