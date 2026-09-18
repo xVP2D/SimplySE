@@ -322,6 +322,10 @@ func (s *Store) ListCommands(ctx context.Context, opts ListCommandsOptions) (Lis
 		SELECT `+commandColumns+`, count(*) OVER() AS total
 		FROM commands c
 		WHERE ($1 = '' OR c.agent_id = $1) AND ($2 = '' OR c.status = $2)
+		  -- audit2allow generation is not an applied rule: it is tracked on
+		  -- the Suggestions page, and listing it here only doubled every
+		  -- approved module with a row that can't be deleted.
+		  AND c.type <> 'suggest_module'
 		ORDER BY c.created_at DESC
 		LIMIT $3 OFFSET $4
 	`, opts.AgentID, opts.Status, opts.Limit, opts.Offset)
@@ -677,6 +681,73 @@ func (s *Store) ReviewSuggestedModule(ctx context.Context, id, status, reviewedB
 		return fmt.Errorf("review suggested module: %w", err)
 	}
 	return nil
+}
+
+// ClaimSuggestionForApproval atomically moves a pending suggestion to
+// approved, so of several simultaneous approvals exactly one wins. Returns
+// false if it wasn't pending (already claimed, rejected, ...).
+func (s *Store) ClaimSuggestionForApproval(ctx context.Context, id, reviewedBy string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE suggested_modules SET status = 'approved', reviewed_at = now(), reviewed_by = $2
+		WHERE id = $1 AND status = 'pending'
+	`, id, reviewedBy)
+	if err != nil {
+		return false, fmt.Errorf("claim suggestion: %w", err)
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// ReleaseSuggestionClaim puts a claimed suggestion back to pending when
+// nothing ended up being installed.
+func (s *Store) ReleaseSuggestionClaim(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE suggested_modules SET status = 'pending', reviewed_at = NULL, reviewed_by = ''
+		WHERE id = $1 AND status = 'approved'
+	`, id)
+	return err
+}
+
+// FindOpenSuggestion returns the newest suggestion for this agent and module
+// that is still worth reusing instead of creating another: one being
+// generated or awaiting review, or an approved one (the caller decides
+// whether an approved module is still installed).
+func (s *Store) FindOpenSuggestion(ctx context.Context, agentID, moduleName string) (SuggestedModule, bool, error) {
+	var m SuggestedModule
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, command_id, agent_id, module_name, scontext, tcontext, tclass, te_text, pp_base64,
+			status, error_message, created_at, reviewed_at, reviewed_by
+		FROM suggested_modules
+		WHERE agent_id = $1 AND module_name = $2 AND status IN ('generating', 'pending', 'approved')
+		ORDER BY created_at DESC LIMIT 1
+	`, agentID, moduleName).Scan(&m.ID, &m.CommandID, &m.AgentID, &m.ModuleName, &m.SContext, &m.TContext, &m.TClass,
+		&m.TEText, &m.PPBase64, &m.Status, &m.ErrorMessage, &m.CreatedAt, &m.ReviewedAt, &m.ReviewedBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SuggestedModule{}, false, nil
+	}
+	if err != nil {
+		return SuggestedModule{}, false, fmt.Errorf("find open suggestion: %w", err)
+	}
+	return m, true, nil
+}
+
+// ModuleInstallInProgress reports whether an install_module for this module
+// is on its way to the agent, or finished only moments ago — a window in
+// which the agent's inventory may not list the module yet, so it can't be
+// relied on to tell "already installed".
+func (s *Store) ModuleInstallInProgress(ctx context.Context, agentID, moduleName string) (bool, error) {
+	var busy bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM commands
+			WHERE agent_id = $1 AND type = 'install_module' AND payload_json->>'name' = $2
+			  AND (status IN ('pending', 'sent') OR (status = 'acked' AND created_at > now() - interval '2 minutes'))
+		)
+	`, agentID, moduleName).Scan(&busy)
+	if err != nil {
+		return false, fmt.Errorf("check module install in progress: %w", err)
+	}
+	return busy, nil
 }
 
 type IntegrationSetting struct {

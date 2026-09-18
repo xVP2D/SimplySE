@@ -85,6 +85,27 @@ func dispatch(ctx context.Context, store *postgres.Store, hub *Hub, n postgres.N
 // SUGGEST_MODULE comment and the agent's action::suggest_module).
 func RequestModuleSuggestion(ctx context.Context, store *postgres.Store, hub *Hub, agentID, scontext, tcontext, tclass, rawLine string) (postgres.SuggestedModule, error) {
 	moduleName := rules.SuggestedModuleName(rules.Observation{SContext: scontext, TContext: tcontext, TClass: tclass})
+
+	// One suggestion per (machine, module): the automatic trigger and the
+	// "fix on this machine" button both land here, and every extra click
+	// used to create another identical suggestion — which could then each
+	// be approved, installing the same module again and again.
+	if existing, found, err := store.FindOpenSuggestion(ctx, agentID, moduleName); err != nil {
+		return postgres.SuggestedModule{}, err
+	} else if found && existing.Status != "approved" {
+		return existing, nil
+	} else if found {
+		// Approved: only reusable while the module is actually still there
+		// (it may have been removed since, e.g. by deleting the rule).
+		if state, ok, _ := store.GetSelinuxState(ctx, agentID); ok {
+			for _, m := range state.Modules {
+				if m.Name == moduleName {
+					return existing, nil
+				}
+			}
+		}
+	}
+
 	payloadJSON, err := json.Marshal(map[string]any{
 		"raw_lines":   []string{rawLine},
 		"module_name": moduleName,

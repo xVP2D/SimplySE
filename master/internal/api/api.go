@@ -500,6 +500,15 @@ func (a *API) approveSuggestedModule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, fmt.Errorf("suggestion is %q, not pending", m.Status))
 		return
 	}
+	// Claim it before doing anything: of two simultaneous approvals (a
+	// double click, two operators) exactly one gets past this point.
+	if won, err := a.Store.ClaimSuggestionForApproval(r.Context(), m.ID, reviewedBy); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	} else if !won {
+		writeError(w, http.StatusConflict, errors.New("suggestion was just approved or rejected by another request"))
+		return
+	}
 
 	payloadJSON, err := json.Marshal(map[string]any{"name": m.ModuleName, "content_base64": m.PPBase64})
 	if err != nil {
@@ -508,7 +517,15 @@ func (a *API) approveSuggestedModule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	commands := make([]postgres.Command, 0, len(req.AgentIDs))
+	skipped := map[string]string{}
 	for _, agentID := range req.AgentIDs {
+		// Never install the same module twice: not if it is already there
+		// (per the agent's inventory), nor if an install of it is already
+		// on its way or just finished.
+		if reason := a.moduleAlreadyThere(r.Context(), agentID, m.ModuleName); reason != "" {
+			skipped[agentID] = reason
+			continue
+		}
 		cmd, err := server.DispatchCommand(r.Context(), a.Store, a.Hub, agentID, nil, "install_module", string(payloadJSON))
 		if err != nil {
 			a.Log.Error("dispatch install_module for approved suggestion failed", "agent_id", agentID, "error", err)
@@ -516,12 +533,39 @@ func (a *API) approveSuggestedModule(w http.ResponseWriter, r *http.Request) {
 		}
 		commands = append(commands, cmd)
 	}
-
-	if err := a.Store.ReviewSuggestedModule(r.Context(), m.ID, "approved", reviewedBy); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+	if len(commands) == 0 {
+		// Nothing was installed: don't leave it looking approved.
+		_ = a.Store.ReleaseSuggestionClaim(r.Context(), m.ID)
+	}
+	if len(commands) == 0 && len(skipped) > 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":   fmt.Sprintf("module %s is already installed or being installed on the selected agent(s)", m.ModuleName),
+			"skipped": skipped,
+		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "approved", "commands": commands})
+
+	if len(commands) == 0 {
+		writeError(w, http.StatusBadGateway, errors.New("could not dispatch the install to any of the selected agents"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "approved", "commands": commands, "skipped": skipped})
+}
+
+// moduleAlreadyThere returns why installing moduleName on agentID would be a
+// duplicate, or "" if it wouldn't.
+func (a *API) moduleAlreadyThere(ctx context.Context, agentID, moduleName string) string {
+	if busy, err := a.Store.ModuleInstallInProgress(ctx, agentID, moduleName); err == nil && busy {
+		return "install already in progress"
+	}
+	if state, ok, err := a.Store.GetSelinuxState(ctx, agentID); err == nil && ok {
+		for _, mod := range state.Modules {
+			if mod.Name == moduleName {
+				return "already installed"
+			}
+		}
+	}
+	return ""
 }
 
 func (a *API) rejectSuggestedModule(w http.ResponseWriter, r *http.Request) {
