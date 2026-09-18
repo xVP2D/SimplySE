@@ -144,6 +144,53 @@ export interface AlertSearchResult {
   total: number;
 }
 
+export interface SiemOpenSearchSettings {
+  enabled: boolean;
+  name: string;
+  url: string;
+  index: string;
+  host_field: string;
+  user: string;
+  password_set: boolean;
+  insecure_skip_verify: boolean;
+}
+
+export interface LibreNmsSettings {
+  enabled: boolean;
+  url: string;
+  token_set: boolean;
+}
+
+export interface IntegrationSettings {
+  siem_opensearch: SiemOpenSearchSettings;
+  librenms: LibreNmsSettings;
+}
+
+// password/token: leave blank to keep the currently stored secret
+// unchanged — only sent to the server when the operator actually typed a
+// new value.
+export interface SiemOpenSearchSaveRequest {
+  enabled: boolean;
+  name: string;
+  url: string;
+  index: string;
+  host_field: string;
+  user: string;
+  password: string;
+  insecure_skip_verify: boolean;
+}
+
+export interface LibreNmsSaveRequest {
+  enabled: boolean;
+  url: string;
+  token: string;
+}
+
+export interface ConnectionTestResult {
+  ok: boolean;
+  error?: string;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...init,
@@ -165,6 +212,15 @@ export const api = {
   correlateSources: () => request<string[]>("/correlate/sources"),
   correlateAgent: (id: string, aroundUnix: number, windowSeconds = 60) =>
     request<CorrelatedEvent[]>(`/agents/${id}/correlate?around=${aroundUnix}&window=${windowSeconds}`),
+  getIntegrations: () => request<IntegrationSettings>("/integrations"),
+  saveSiemOpenSearch: (payload: SiemOpenSearchSaveRequest) =>
+    request<{ status: string }>("/integrations/siem-opensearch", { method: "PUT", body: JSON.stringify(payload) }),
+  testSiemOpenSearch: (payload: SiemOpenSearchSaveRequest) =>
+    request<ConnectionTestResult>("/integrations/siem-opensearch/test", { method: "POST", body: JSON.stringify(payload) }),
+  saveLibreNMS: (payload: LibreNmsSaveRequest) =>
+    request<{ status: string }>("/integrations/librenms", { method: "PUT", body: JSON.stringify(payload) }),
+  testLibreNMS: (payload: LibreNmsSaveRequest) =>
+    request<ConnectionTestResult>("/integrations/librenms/test", { method: "POST", body: JSON.stringify(payload) }),
   listDenials: (params: { agentId?: string; query?: string; offset?: number; limit?: number } = {}) => {
     const qs = new URLSearchParams();
     if (params.agentId) qs.set("agent_id", params.agentId);

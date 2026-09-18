@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -30,14 +31,18 @@ type OpenSearchSource struct {
 	client    *http.Client
 }
 
+// OpenSearchSourceConfig doubles as the wire/storage format for this
+// connector's settings (see internal/api/integrations.go) — Password is
+// only ever populated on a save request, and the API layer is
+// responsible for never echoing it back in a GET response.
 type OpenSearchSourceConfig struct {
-	Name               string
-	BaseURL            string
-	Index              string
-	HostField          string
-	User               string
-	Password           string
-	InsecureSkipVerify bool // self-signed certs are the norm for these stacks in the wild; opt-in only
+	Name               string `json:"name"`
+	BaseURL            string `json:"url"`
+	Index              string `json:"index"`
+	HostField          string `json:"host_field"`
+	User               string `json:"user"`
+	Password           string `json:"password,omitempty"`
+	InsecureSkipVerify bool   `json:"insecure_skip_verify"` // self-signed certs are the norm for these stacks in the wild; opt-in only
 }
 
 func NewOpenSearchSource(cfg OpenSearchSourceConfig) *OpenSearchSource {
@@ -61,6 +66,42 @@ func NewOpenSearchSource(cfg OpenSearchSourceConfig) *OpenSearchSource {
 }
 
 func (s *OpenSearchSource) Name() string { return s.name }
+
+// Ping runs a trivial, cheap query (match_all, size 0) against the
+// configured index — enough to confirm the URL is reachable, TLS/auth
+// succeed, and the index actually exists, without pulling any real data.
+// Used by the "test connection" button on the integrations settings page.
+func (s *OpenSearchSource) Ping(ctx context.Context) error {
+	if s.baseURL == "" {
+		return fmt.Errorf("url is required")
+	}
+	if s.index == "" {
+		return fmt.Errorf("index is required")
+	}
+	body, err := json.Marshal(map[string]any{"size": 0, "query": map[string]any{"match_all": map[string]any{}}})
+	if err != nil {
+		return fmt.Errorf("marshal query: %w", err)
+	}
+	url := fmt.Sprintf("%s/%s/_search", s.baseURL, s.index)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if s.user != "" {
+		req.SetBasicAuth(s.user, s.password)
+	}
+	res, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(res.Body, 2048))
+		return fmt.Errorf("unexpected status %s: %s", res.Status, strings.TrimSpace(string(respBody)))
+	}
+	return nil
+}
 
 func (s *OpenSearchSource) Query(ctx context.Context, ip, hostname string, around time.Time, window time.Duration) ([]Event, error) {
 	if s.baseURL == "" || s.index == "" || ip == "" {

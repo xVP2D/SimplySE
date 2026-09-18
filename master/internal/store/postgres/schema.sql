@@ -128,3 +128,20 @@ CREATE TABLE IF NOT EXISTS suggested_modules (
 
 CREATE INDEX IF NOT EXISTS idx_suggested_modules_command_id ON suggested_modules (command_id);
 CREATE INDEX IF NOT EXISTS idx_suggested_modules_created_at ON suggested_modules (created_at DESC);
+
+-- SIEM/EDR/monitoring connector settings (see internal/correlate and
+-- internal/api/integrations.go), configured from the dashboard's
+-- Settings page instead of master.env — one fixed row per known
+-- connector ('siem_opensearch', 'librenms'). config_json holds that
+-- connector's correlate.*Config struct verbatim (its own json tags
+-- double as the storage format), including the secret field (password/
+-- token) in plaintext — same trade-off already made for
+-- /etc/selinux-fleet-manager/secrets.env (root-only file permissions,
+-- no separate encryption layer); the API layer never echoes the secret
+-- back out in a GET response.
+CREATE TABLE IF NOT EXISTS integration_settings (
+    key         TEXT PRIMARY KEY,
+    enabled     BOOLEAN NOT NULL DEFAULT false,
+    config_json JSONB NOT NULL DEFAULT '{}',
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

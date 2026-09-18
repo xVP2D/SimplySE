@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,9 +23,12 @@ type LibreNMSSource struct {
 	client  *http.Client
 }
 
+// LibreNMSSourceConfig doubles as the wire/storage format for this
+// connector's settings (see internal/api/integrations.go) — Token is only
+// ever populated on a save request, never echoed back in a GET response.
 type LibreNMSSourceConfig struct {
-	BaseURL string
-	Token   string
+	BaseURL string `json:"url"`
+	Token   string `json:"token,omitempty"`
 }
 
 func NewLibreNMSSource(cfg LibreNMSSourceConfig) *LibreNMSSource {
@@ -36,6 +40,33 @@ func NewLibreNMSSource(cfg LibreNMSSourceConfig) *LibreNMSSource {
 }
 
 func (s *LibreNMSSource) Name() string { return "librenms" }
+
+// Ping hits the same /alerts endpoint Query uses, discarding the body —
+// enough to confirm the URL and token actually work. Used by the "test
+// connection" button on the integrations settings page.
+func (s *LibreNMSSource) Ping(ctx context.Context) error {
+	if s.baseURL == "" {
+		return fmt.Errorf("url is required")
+	}
+	if s.token == "" {
+		return fmt.Errorf("token is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+"/api/v0/alerts", nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("X-Auth-Token", s.token)
+	res, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 2048))
+		return fmt.Errorf("unexpected status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
 
 func (s *LibreNMSSource) Query(ctx context.Context, ip, hostname string, around time.Time, window time.Duration) ([]Event, error) {
 	if s.baseURL == "" || s.token == "" || hostname == "" {

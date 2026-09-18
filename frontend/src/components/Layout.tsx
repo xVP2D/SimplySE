@@ -11,6 +11,7 @@ const navItems = [
   { to: "/alerts", icon: "ph-bell", key: "nav.alerts" },
   { to: "/suggestions", icon: "ph-magic-wand", key: "nav.suggestions" },
   { to: "/wiki", icon: "ph-book-open", key: "nav.wiki" },
+  { to: "/settings", icon: "ph-gear", key: "nav.settings" },
 ];
 
 export function Layout() {

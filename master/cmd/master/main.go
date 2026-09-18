@@ -54,21 +54,6 @@ type config struct {
 	// disables serving it (e.g. local dev, where it runs via its own
 	// `npm run dev`). See api.API.FrontendDist.
 	FrontendDist string
-
-	// Correlation (Phase E): on-demand queries against SIEM/EDR/monitoring
-	// tools already deployed in the environment, never bulk ingestion —
-	// see internal/correlate's package doc. Every field here is optional;
-	// leaving SIEMOpenSearchURL/LibreNMSURL empty simply doesn't register
-	// that connector.
-	SIEMOpenSearchName               string
-	SIEMOpenSearchURL                string
-	SIEMOpenSearchIndex              string
-	SIEMOpenSearchHostField          string
-	SIEMOpenSearchUser               string
-	SIEMOpenSearchPassword           string
-	SIEMOpenSearchInsecureSkipVerify bool
-	LibreNMSURL                      string
-	LibreNMSToken                    string
 }
 
 func loadConfig() config {
@@ -85,16 +70,6 @@ func loadConfig() config {
 		AgentCertFile: getenv("AGENT_CERT_FILE", "deploy/certs/agent-dev.crt"),
 		AgentKeyFile:  getenv("AGENT_KEY_FILE", "deploy/certs/agent-dev.key"),
 		FrontendDist:  getenv("FRONTEND_DIST", "frontend/dist"),
-
-		SIEMOpenSearchName:               getenv("SIEM_OPENSEARCH_NAME", "siem"),
-		SIEMOpenSearchURL:                getenv("SIEM_OPENSEARCH_URL", ""),
-		SIEMOpenSearchIndex:              getenv("SIEM_OPENSEARCH_INDEX", "wazuh-alerts-*"),
-		SIEMOpenSearchHostField:          getenv("SIEM_OPENSEARCH_HOST_FIELD", "agent.ip"),
-		SIEMOpenSearchUser:               getenv("SIEM_OPENSEARCH_USER", ""),
-		SIEMOpenSearchPassword:           getenv("SIEM_OPENSEARCH_PASSWORD", ""),
-		SIEMOpenSearchInsecureSkipVerify: getenv("SIEM_OPENSEARCH_INSECURE_SKIP_VERIFY", "") == "true",
-		LibreNMSURL:                      getenv("LIBRENMS_URL", ""),
-		LibreNMSToken:                    getenv("LIBRENMS_TOKEN", ""),
 	}
 }
 
@@ -262,29 +237,17 @@ func run(log *slog.Logger) error {
 		log.Info("serving dashboard", "path", cfg.FrontendDist)
 	}
 
-	var correlateSources []correlate.Source
-	if cfg.SIEMOpenSearchURL != "" {
-		correlateSources = append(correlateSources, correlate.NewOpenSearchSource(correlate.OpenSearchSourceConfig{
-			Name:               cfg.SIEMOpenSearchName,
-			BaseURL:            cfg.SIEMOpenSearchURL,
-			Index:              cfg.SIEMOpenSearchIndex,
-			HostField:          cfg.SIEMOpenSearchHostField,
-			User:               cfg.SIEMOpenSearchUser,
-			Password:           cfg.SIEMOpenSearchPassword,
-			InsecureSkipVerify: cfg.SIEMOpenSearchInsecureSkipVerify,
-		}))
-		log.Info("SIEM correlation source registered", "name", cfg.SIEMOpenSearchName, "index", cfg.SIEMOpenSearchIndex)
+	// Correlation (Phase E) connectors are configured from the dashboard's
+	// Settings page (Postgres-backed, see internal/api/integrations.go),
+	// not env vars — loaded once here at startup and reloaded in place by
+	// every settings save, so a save takes effect immediately with no
+	// restart.
+	correlateRegistry := correlate.NewRegistry()
+	if err := api.RebuildCorrelateRegistry(ctx, pg, correlateRegistry, log); err != nil {
+		log.Error("load correlation settings failed", "error", err)
 	}
-	if cfg.LibreNMSURL != "" {
-		correlateSources = append(correlateSources, correlate.NewLibreNMSSource(correlate.LibreNMSSourceConfig{
-			BaseURL: cfg.LibreNMSURL,
-			Token:   cfg.LibreNMSToken,
-		}))
-		log.Info("LibreNMS correlation source registered")
-	}
-	correlateRegistry := correlate.NewRegistry(correlateSources...)
 	if !correlateRegistry.HasSources() {
-		log.Info("no correlation sources configured (SIEM_OPENSEARCH_URL/LIBRENMS_URL unset) — cross-source correlation disabled")
+		log.Info("no correlation sources configured (Paramètres > Intégrations) — cross-source correlation disabled")
 	}
 
 	apiHandler := (&api.API{

@@ -17,6 +17,7 @@ package correlate
 import (
 	"context"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -39,26 +40,43 @@ type Source interface {
 	Query(ctx context.Context, ip, hostname string, around time.Time, window time.Duration) ([]Event, error)
 }
 
-// Registry holds whichever Sources were actually configured (via env
-// vars — see cmd/master/main.go) and fans a correlation request out to
-// all of them. A Registry with no sources is valid and simply returns no
-// events for every query — the API/frontend treat that as "correlation
-// not configured" rather than an error.
+// Registry holds whichever Sources are currently configured (see the
+// integration_settings table, loaded/updated via the /api/integrations
+// endpoints — internal/api/integrations.go) and fans a correlation
+// request out to all of them. A Registry with no sources is valid and
+// simply returns no events for every query — the API/frontend treat that
+// as "correlation not configured" rather than an error. Mutable at
+// runtime via SetSources so saving new settings from the dashboard takes
+// effect immediately, with no master restart needed.
 type Registry struct {
+	mu      sync.RWMutex
 	sources []Source
 }
 
 func NewRegistry(sources ...Source) *Registry {
-	var r Registry
+	r := &Registry{}
+	r.SetSources(sources...)
+	return r
+}
+
+// SetSources atomically replaces the whole source list — always called
+// with the *complete* set (every configured, enabled connector), never
+// incrementally, so a disabled/removed integration actually disappears.
+func (r *Registry) SetSources(sources ...Source) {
+	filtered := make([]Source, 0, len(sources))
 	for _, s := range sources {
 		if s != nil {
-			r.sources = append(r.sources, s)
+			filtered = append(filtered, s)
 		}
 	}
-	return &r
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sources = filtered
 }
 
 func (r *Registry) SourceNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	names := make([]string, 0, len(r.sources))
 	for _, s := range r.sources {
 		names = append(names, s.Name())
@@ -67,6 +85,8 @@ func (r *Registry) SourceNames() []string {
 }
 
 func (r *Registry) HasSources() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return len(r.sources) > 0
 }
 
@@ -77,8 +97,12 @@ func (r *Registry) HasSources() bool {
 // blank out results from the others — callers that want to know about a
 // failure should check logs, not this return value.
 func (r *Registry) QueryAll(ctx context.Context, ip, hostname string, around time.Time, window time.Duration) []Event {
+	r.mu.RLock()
+	sources := append([]Source(nil), r.sources...)
+	r.mu.RUnlock()
+
 	all := []Event{} // never nil: encodes to `[]`, not `null`, when empty
-	for _, s := range r.sources {
+	for _, s := range sources {
 		events, err := s.Query(ctx, ip, hostname, around, window)
 		if err != nil {
 			continue

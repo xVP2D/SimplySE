@@ -601,3 +601,46 @@ func (s *Store) ReviewSuggestedModule(ctx context.Context, id, status, reviewedB
 	}
 	return nil
 }
+
+type IntegrationSetting struct {
+	Key        string    `json:"key"`
+	Enabled    bool      `json:"enabled"`
+	ConfigJSON []byte    `json:"-"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// UpsertIntegrationSetting saves (or replaces) the full config for one
+// connector — always the complete config, never a partial patch; callers
+// merge in whatever should be kept (e.g. an unchanged password) before
+// calling this.
+func (s *Store) UpsertIntegrationSetting(ctx context.Context, key string, enabled bool, configJSON []byte) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO integration_settings (key, enabled, config_json, updated_at)
+		VALUES ($1, $2, $3, now())
+		ON CONFLICT (key) DO UPDATE SET
+			enabled = EXCLUDED.enabled,
+			config_json = EXCLUDED.config_json,
+			updated_at = now()
+	`, key, enabled, configJSON)
+	if err != nil {
+		return fmt.Errorf("upsert integration setting %s: %w", key, err)
+	}
+	return nil
+}
+
+// GetIntegrationSetting returns (setting, false, nil) — not an error —
+// when nothing has been saved for this key yet (never configured).
+func (s *Store) GetIntegrationSetting(ctx context.Context, key string) (IntegrationSetting, bool, error) {
+	var setting IntegrationSetting
+	setting.Key = key
+	err := s.db.QueryRowContext(ctx, `
+		SELECT enabled, config_json, updated_at FROM integration_settings WHERE key = $1
+	`, key).Scan(&setting.Enabled, &setting.ConfigJSON, &setting.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return IntegrationSetting{Key: key}, false, nil
+	}
+	if err != nil {
+		return IntegrationSetting{}, false, fmt.Errorf("get integration setting %s: %w", key, err)
+	}
+	return setting, true, nil
+}

@@ -27,12 +27,14 @@ const en: Dict = {
     alerts: "Alerts",
     suggestions: "Suggestions",
     wiki: "Wiki",
+    settings: "Settings",
   },
   brand: {
     subtitle: "Fleet control",
   },
   common: {
     loading: "Loading…",
+    save: "Save",
     previous: "Previous",
     next: "Next",
     never: "never",
@@ -201,6 +203,33 @@ const en: Dict = {
     confirmReject: "Reject this suggestion?",
     empty: "No suggestions match this filter.",
   },
+  settings: {
+    explainer:
+      "Connect an already-deployed SIEM/EDR/monitoring tool (Wazuh, Suricata via an ELK-family stack, LibreNMS…) so denials can be correlated on demand against what it already saw around the same time — nothing is bulk-ingested or duplicated here, only queried live when you open an agent's correlation panel. Saving takes effect immediately, no restart needed.",
+    enabled: "Enabled",
+    testConnection: "Test connection",
+    saved: "Saved.",
+    testOk: "Connection OK.",
+    testFailed: "Connection failed: {error}",
+    passwordUnchanged: "(unchanged — leave blank to keep it)",
+    siem: {
+      title: "SIEM / EDR (OpenSearch-compatible)",
+      help: "Works with Wazuh's indexer, or any Suricata/ECS log stack shipped into an OpenSearch or Elasticsearch index.",
+      name: "Display name",
+      url: "URL",
+      index: "Index pattern",
+      hostField: "Host field",
+      user: "User",
+      password: "Password",
+      insecureSkipVerify: "Skip TLS certificate verification (self-signed)",
+    },
+    librenms: {
+      title: "LibreNMS",
+      help: "Queries LibreNMS's alert log for the agent's host around the same time as a denial.",
+      url: "URL",
+      token: "API token",
+    },
+  },
 };
 
 const fr: Dict = {
@@ -214,12 +243,14 @@ const fr: Dict = {
     alerts: "Alertes",
     suggestions: "Suggestions",
     wiki: "Wiki",
+    settings: "Paramètres",
   },
   brand: {
     subtitle: "Fleet control",
   },
   common: {
     loading: "Chargement…",
+    save: "Enregistrer",
     previous: "Précédent",
     next: "Suivant",
     never: "jamais",
@@ -388,6 +419,33 @@ const fr: Dict = {
     confirmReject: "Rejeter cette suggestion ?",
     empty: "Aucune suggestion ne correspond à ce filtre.",
   },
+  settings: {
+    explainer:
+      "Connectez un outil SIEM/EDR/supervision déjà déployé (Wazuh, Suricata via une stack ELK, LibreNMS…) pour corréler les dénis à la demande avec ce qu'il a déjà vu au même moment — rien n'est ingéré en masse ni dupliqué ici, seulement interrogé en direct à l'ouverture du panneau de corrélation d'un agent. L'enregistrement prend effet immédiatement, sans redémarrage.",
+    enabled: "Activé",
+    testConnection: "Tester la connexion",
+    saved: "Enregistré.",
+    testOk: "Connexion OK.",
+    testFailed: "Échec de la connexion : {error}",
+    passwordUnchanged: "(inchangé — laisser vide pour le conserver)",
+    siem: {
+      title: "SIEM / EDR (compatible OpenSearch)",
+      help: "Fonctionne avec l'indexeur de Wazuh, ou toute stack de logs Suricata/ECS envoyée vers un index OpenSearch ou Elasticsearch.",
+      name: "Nom d'affichage",
+      url: "URL",
+      index: "Motif d'index",
+      hostField: "Champ hôte",
+      user: "Utilisateur",
+      password: "Mot de passe",
+      insecureSkipVerify: "Ignorer la vérification du certificat TLS (auto-signé)",
+    },
+    librenms: {
+      title: "LibreNMS",
+      help: "Interroge le journal d'alertes LibreNMS pour l'hôte de l'agent, autour du même moment qu'un déni.",
+      url: "URL",
+      token: "Jeton API",
+    },
+  },
 };
 
 const es: Dict = {
@@ -401,12 +459,14 @@ const es: Dict = {
     alerts: "Alertas",
     suggestions: "Sugerencias",
     wiki: "Wiki",
+    settings: "Ajustes",
   },
   brand: {
     subtitle: "Fleet control",
   },
   common: {
     loading: "Cargando…",
+    save: "Guardar",
     previous: "Anterior",
     next: "Siguiente",
     never: "nunca",
@@ -574,6 +634,33 @@ const es: Dict = {
     confirmApprove: "Instalar este módulo en {count} agente | Instalar este módulo en {count} agentes",
     confirmReject: "¿Rechazar esta sugerencia?",
     empty: "Ninguna sugerencia coincide con este filtro.",
+  },
+  settings: {
+    explainer:
+      "Conecte una herramienta SIEM/EDR/supervisión ya desplegada (Wazuh, Suricata mediante una pila ELK, LibreNMS…) para correlacionar las denegaciones bajo demanda con lo que ya vio en el mismo momento — nada se ingiere en bloque ni se duplica aquí, solo se consulta en vivo al abrir el panel de correlación de un agente. Guardar surte efecto de inmediato, sin reiniciar.",
+    enabled: "Activado",
+    testConnection: "Probar conexión",
+    saved: "Guardado.",
+    testOk: "Conexión OK.",
+    testFailed: "Conexión fallida: {error}",
+    passwordUnchanged: "(sin cambios — déjelo vacío para conservarlo)",
+    siem: {
+      title: "SIEM / EDR (compatible con OpenSearch)",
+      help: "Funciona con el indexador de Wazuh, o cualquier pila de logs Suricata/ECS enviada a un índice OpenSearch o Elasticsearch.",
+      name: "Nombre para mostrar",
+      url: "URL",
+      index: "Patrón de índice",
+      hostField: "Campo de host",
+      user: "Usuario",
+      password: "Contraseña",
+      insecureSkipVerify: "Omitir verificación del certificado TLS (autofirmado)",
+    },
+    librenms: {
+      title: "LibreNMS",
+      help: "Consulta el registro de alertas de LibreNMS para el host del agente, alrededor del mismo momento que una denegación.",
+      url: "URL",
+      token: "Token de API",
+    },
   },
 };
 
