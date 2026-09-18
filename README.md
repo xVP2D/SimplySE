@@ -251,6 +251,44 @@ connecteur générique) : implémenter l'interface `correlate.Source`
 (`Query(ctx, ip, hostname, around, window) ([]Event, error)`) et
 l'enregistrer dans `cmd/master/main.go`.
 
+## Un denial disparaît dès qu'une règle l'autorise
+
+Quand une règle rend un denial autorisé, ce denial **et ses occurrences**
+disparaissent de la page Denials, de la Matrice, de la Tendance et du
+tableau « Signatures les plus fréquentes » du dashboard — quelle que soit la
+façon dont la règle est arrivée : règle déployée depuis le dashboard
+(booléen, module, contexte de fichier), suggestion approuvée, ou
+modification faite **à la main sur la machine** (`setsebool`, `semodule`,
+`chcon`, `semanage`…).
+
+Le master ne devine pas : il **demande à l'agent** si le denial serait encore
+refusé maintenant (messages gRPC `CheckDenials` / `DenialsChecked`). L'agent
+répond d'après la politique **réellement chargée dans le noyau** de la machine
+(interface `selinuxfs` `access`, sans `sesearch` ni outil externe), donc en
+tenant compte des modules, de l'état des booléens et de l'**étiquette actuelle**
+du fichier concerné. Déclencheurs : immédiatement après l'accusé d'un
+`set_boolean` / `install_module` / `chcon` (≈ 3 s), et un balayage toutes les
+30 s pour tout ce qui est fait hors de l'outil (≈ 20-30 s).
+
+- **Regroupement** : les événements identiques (source, cible, classe,
+  permissions, chemin) partagent une signature `sig` ; une seule question par
+  signature et par agent, quel que soit le nombre d'occurrences (un orage de
+  23 000 denials = une sonde). Au plus 300 signatures par agent et par balayage,
+  les plus récentes d'abord.
+- **Résolu = masqué, pas supprimé** : les événements reçoivent `resolved:true`
+  (comme la quarantaine, ils sont exclus de tous les affichages). Si la règle
+  est retirée plus tard et que l'accès est de nouveau refusé, ce sont de
+  **nouveaux** événements, qui s'affichent normalement.
+- **Chemin du fichier** : un AVC de lecture ne porte que le nom de base ; l'agent
+  attache le chemin complet en corrélant l'AVC avec l'enregistrement `PATH` du
+  même événement d'audit (même numéro de série, même inode). C'est ce qui permet
+  de reconnaître qu'un `chcon`/`restorecon` a réparé un denial.
+- **Limites** : un denial sans chemin ni inode ne peut pas être reconnu comme
+  réparé par un simple changement d'étiquette (seuls les changements de
+  politique — module, booléen — comptent) ; une machine hors ligne n'est
+  interrogée qu'à sa reconnexion ; les agents antérieurs à cette fonction
+  ignorent la question (leurs denials restent affichés) — les mettre à jour.
+
 ## Supprimer une règle appliquée (annulation réelle)
 
 Le bouton **Supprimer** d'une ligne de « Règles appliquées » (page agent) ou
