@@ -251,6 +251,18 @@ connecteur générique) : implémenter l'interface `correlate.Source`
 (`Query(ctx, ip, hostname, around, window) ([]Event, error)`) et
 l'enregistrer dans `cmd/master/main.go`.
 
+## Quarantaine et suppression de denials
+
+Sur la page **Denials**, chaque ligne a un bouton **Quarantaine** et un bouton
+**Supprimer**. Un denial mis en quarantaine (champ `quarantined: true` sur son
+document OpenSearch) disparaît de la liste, de la Matrice et de la Tendance et
+apparaît sur la page **Quarantaine**, d'où on peut le **Restaurer** ou le
+**Supprimer** définitivement. Endpoints : `POST /api/denials/quarantine` et
+`/restore` (corps `{index, id}`), `DELETE /api/denials/{index}/{id}`. L'index
+et l'id sont validés (seuls les documents `avc_events[-YYYY.MM.dd]` sont
+atteignables). Ne touche pas le compteur « signatures les plus fréquentes » du
+dashboard, qui vient des compteurs en mémoire du moteur de règles.
+
 ## Volumétrie : dimensionner pour un gros volume de denials
 
 Le composant qui détermine la capacité réelle du système, c'est
@@ -275,7 +287,13 @@ NATS restent légers quel que soit la taille de la flotte.
   données déjà présentes dans l'index fixe historique `avc_events` restent
   lisibles (Denials/Matrice/Trend interrogent les deux), mais cet index
   n'est plus jamais écrit et n'est pas concerné par la politique de
-  rétention (à purger manuellement si besoin).
+  rétention (à purger manuellement si besoin). Détail ISM à connaître :
+  le `ism_template` d'une politique ne s'applique qu'aux index créés
+  *après* sa dernière mise à jour, et le master la réécrit à chaque
+  démarrage — il attache donc aussi explicitement la politique aux index
+  `avc_events-*` déjà existants (sinon un index créé peu avant un
+  redémarrage ne serait jamais géré). La découverte d'un nouvel index par
+  ISM prend jusqu'à ~15 min (balayage toutes les 10 min, index de ≥ 5 min).
 - **Disque** : prévoir large — l'indexation est intensive en écritures
   aléatoires, du SSD/NVMe est recommandé dès que le volume de denials
   monte. Le besoin dépend directement de
