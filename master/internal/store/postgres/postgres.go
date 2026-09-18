@@ -358,6 +358,16 @@ func (s *Store) ListCommands(ctx context.Context, opts ListCommandsOptions) (Lis
 		  -- latter in domain_collections), and listing them here only
 		  -- doubled every approved module with a row that can't be deleted.
 		  AND c.type NOT IN ('suggest_module', 'permissive_start', 'permissive_stop')
+		  -- An in-flight undo (remove_module/restorecon dispatched by
+		  -- RevertCommand) is hidden while pending/sent: the rule it is
+		  -- undoing already shows "reverting" via revert_pending, so
+		  -- showing this row too just duplicated the entry on screen for
+		  -- as long as the undo took. Once it fails it stays visible
+		  -- (status flips to 'failed', outside this filter) so the error
+		  -- remains visible and retryable; once it succeeds, both rows are
+		  -- deleted together (see completeRevertIfApplicable) so there is
+		  -- nothing left to filter.
+		  AND NOT (c.reverts_command_id IS NOT NULL AND c.status IN ('pending', 'sent'))
 		ORDER BY c.created_at DESC
 		LIMIT $3 OFFSET $4
 	`, opts.AgentID, opts.Status, opts.Limit, opts.Offset)
