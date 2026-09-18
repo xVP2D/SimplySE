@@ -30,10 +30,10 @@ const legacyIndexName = "avc_events"
 // documents.
 const indexPrefix = "avc_events-"
 
-// retentionPolicyID/templateName back EnsureRetentionPolicy: a policy that
-// deletes a avc_events-* index once it's old enough, and a template that
-// auto-attaches that policy to every new one as it's created (no per-index
-// setup needed at write time).
+// retentionPolicyID/templateName back EnsureRetentionPolicy: an ISM policy
+// that deletes a avc_events-* index once it's old enough (and auto-manages
+// every new one via its ism_template), plus an index template pinning
+// shard/replica counts for them.
 const (
 	retentionPolicyID = "avc-events-retention"
 	templateName      = "avc-events"
@@ -435,10 +435,10 @@ func (s *Store) Trend(ctx context.Context, opts TrendOptions) ([]TrendPoint, err
 // EnsureRetentionPolicy makes sure every avc_events-* daily index gets
 // deleted once it's older than retentionDays, without any per-day cleanup
 // job: an Index State Management (ISM) policy does the actual deleting,
-// and an index template auto-attaches that policy to each new daily index
-// the moment IndexAvcEvent creates it (ISM picks up newly-tagged indices
-// on its own periodic sweep, every few minutes by default — nothing here
-// needs to poll or schedule that itself).
+// and its ism_template makes ISM pick up each new daily index on its own
+// periodic coordinator sweep (10 minutes, and only for indices at least
+// 5 minutes old, by default) — nothing here needs to poll or schedule
+// that itself.
 //
 // Idempotent and safe to call on every master startup: the template PUT
 // always replaces cleanly, and the policy PUT (which OpenSearch protects
@@ -469,6 +469,17 @@ func (s *Store) EnsureRetentionPolicy(ctx context.Context, retentionDays int) er
 					"name":        "delete",
 					"actions":     []map[string]any{{"delete": map[string]any{}}},
 					"transitions": []any{},
+				},
+			},
+			// ism_template is what ISM's coordinator actually keys off to
+			// auto-manage new indices by name pattern. A policy_id index
+			// setting alone (tried first, via the index template) is NOT
+			// picked up by that sweep — found live: a fresh daily index
+			// stayed unmanaged indefinitely.
+			"ism_template": []map[string]any{
+				{
+					"index_patterns": []string{indexPrefix + "*"},
+					"priority":       100,
 				},
 			},
 		},
