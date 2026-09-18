@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, type Agent, type AvcEventHit } from "../lib/api";
 import { useTranslation } from "../i18n";
 import { explainDenial } from "../lib/explainDenial";
+import { useAutoRefresh } from "../lib/useAutoRefresh";
 
 const PAGE_SIZE = 25;
 
@@ -25,6 +26,8 @@ export function Denials({ quarantine = false }: { quarantine?: boolean }) {
   const [suggested, setSuggested] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
+  const autoTick = useAutoRefresh(5000);
+  const lastQuery = useRef("");
 
   const runAction = async (d: AvcEventHit, action: () => Promise<unknown>) => {
     setBusyId(d.id);
@@ -77,7 +80,11 @@ export function Denials({ quarantine = false }: { quarantine?: boolean }) {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    // Only show "Loading…" when the query changed; a background refresh
+    // (same query) swaps the rows in silently instead of flickering.
+    const query = `${agentId}|${queryParam}|${offset}|${quarantine}`;
+    if (lastQuery.current !== query) setLoading(true);
+    lastQuery.current = query;
     api
       .listDenials({ agentId: agentId || undefined, query: queryParam || undefined, quarantined: quarantine, offset, limit: PAGE_SIZE })
       .then((result) => {
@@ -95,7 +102,7 @@ export function Denials({ quarantine = false }: { quarantine?: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [agentId, queryParam, offset, quarantine, reloadTick]);
+  }, [agentId, queryParam, offset, quarantine, reloadTick, autoTick]);
 
   // Debounce the free-text search before it becomes a URL param / API call.
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();

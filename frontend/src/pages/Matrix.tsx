@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useAutoRefresh } from "../lib/useAutoRefresh";
 import { Link } from "react-router-dom";
 import { api, type Agent, type MatrixRow, type TrendPoint } from "../lib/api";
 import { useTranslation } from "../i18n";
@@ -48,9 +49,14 @@ export function Matrix() {
     api.listAgents().then(setAgents).catch(() => {});
   }, []);
 
+  const autoTick = useAutoRefresh(5000);
+  const lastDays = useRef<number | null>(null);
+
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    // "Loading…" only when the window changed, not on a background refresh.
+    if (lastDays.current !== days) setLoading(true);
+    lastDays.current = days;
     Promise.all([api.denialMatrix({ days }), api.denialTrend({ days: 14 })])
       .then(([matrixResult, trendResult]) => {
         if (cancelled) return;
@@ -67,7 +73,7 @@ export function Matrix() {
     return () => {
       cancelled = true;
     };
-  }, [days]);
+  }, [days, autoTick]);
 
   // One bar series per agent, 14 fixed-width daily buckets, oldest first.
   const trendByAgent = useMemo(() => {
