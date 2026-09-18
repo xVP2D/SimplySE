@@ -469,3 +469,126 @@ func (s *Store) GetSelinuxState(ctx context.Context, agentID string) (SelinuxSta
 	state.CollectedAt = &collectedAt
 	return state, true, nil
 }
+
+type SuggestedModule struct {
+	ID           string     `json:"id"`
+	CommandID    string     `json:"command_id"`
+	AgentID      string     `json:"agent_id"`
+	ModuleName   string     `json:"module_name"`
+	SContext     string     `json:"scontext"`
+	TContext     string     `json:"tcontext"`
+	TClass       string     `json:"tclass"`
+	TEText       string     `json:"te_text"`
+	PPBase64     string     `json:"pp_base64,omitempty"`
+	Status       string     `json:"status"`
+	ErrorMessage string     `json:"error_message"`
+	CreatedAt    time.Time  `json:"created_at"`
+	ReviewedAt   *time.Time `json:"reviewed_at,omitempty"`
+	ReviewedBy   string     `json:"reviewed_by"`
+}
+
+// CreateSuggestedModule records that a suggest_module command was
+// dispatched — status starts at 'generating' until the agent's ack
+// arrives (see CompleteSuggestedModule).
+func (s *Store) CreateSuggestedModule(ctx context.Context, commandID, agentID, moduleName, scontext, tcontext, tclass string) (SuggestedModule, error) {
+	var m SuggestedModule
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO suggested_modules (command_id, agent_id, module_name, scontext, tcontext, tclass)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, command_id, agent_id, module_name, scontext, tcontext, tclass, te_text, pp_base64,
+			status, error_message, created_at, reviewed_at, reviewed_by
+	`, commandID, agentID, moduleName, scontext, tcontext, tclass).Scan(
+		&m.ID, &m.CommandID, &m.AgentID, &m.ModuleName, &m.SContext, &m.TContext, &m.TClass,
+		&m.TEText, &m.PPBase64, &m.Status, &m.ErrorMessage, &m.CreatedAt, &m.ReviewedAt, &m.ReviewedBy)
+	if err != nil {
+		return SuggestedModule{}, fmt.Errorf("create suggested module: %w", err)
+	}
+	return m, nil
+}
+
+// CompleteSuggestedModule applies the agent's audit2allow result (or
+// failure) to the suggestion created for commandID. A no-op (no error) if
+// no suggestion is tracking that command — e.g. an ack for some other
+// command type.
+func (s *Store) CompleteSuggestedModule(ctx context.Context, commandID string, success bool, teText, ppBase64, errMsg string) error {
+	status := "pending"
+	if !success {
+		status = "failed"
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE suggested_modules SET status = $2, te_text = $3, pp_base64 = $4, error_message = $5
+		WHERE command_id = $1
+	`, commandID, status, teText, ppBase64, errMsg)
+	if err != nil {
+		return fmt.Errorf("complete suggested module: %w", err)
+	}
+	return nil
+}
+
+type ListSuggestedModulesOptions struct {
+	Status string
+	Offset int
+	Limit  int
+}
+
+type ListSuggestedModulesResult struct {
+	Modules []SuggestedModule `json:"modules"`
+	Total   int               `json:"total"`
+}
+
+// ListSuggestedModules omits pp_base64 from each row (it's a compiled
+// binary blob, only useful in bulk when actually deploying — GetSuggestedModule
+// returns it for the one the operator is reviewing).
+func (s *Store) ListSuggestedModules(ctx context.Context, opts ListSuggestedModulesOptions) (ListSuggestedModulesResult, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, command_id, agent_id, module_name, scontext, tcontext, tclass, status,
+			error_message, created_at, reviewed_at, reviewed_by, count(*) OVER() AS total
+		FROM suggested_modules
+		WHERE ($1 = '' OR status = $1)
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`, opts.Status, opts.Limit, opts.Offset)
+	if err != nil {
+		return ListSuggestedModulesResult{}, fmt.Errorf("list suggested modules: %w", err)
+	}
+	defer rows.Close()
+
+	result := ListSuggestedModulesResult{Modules: []SuggestedModule{}}
+	for rows.Next() {
+		var m SuggestedModule
+		if err := rows.Scan(&m.ID, &m.CommandID, &m.AgentID, &m.ModuleName, &m.SContext, &m.TContext, &m.TClass,
+			&m.Status, &m.ErrorMessage, &m.CreatedAt, &m.ReviewedAt, &m.ReviewedBy, &result.Total); err != nil {
+			return ListSuggestedModulesResult{}, fmt.Errorf("scan suggested module: %w", err)
+		}
+		result.Modules = append(result.Modules, m)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) GetSuggestedModule(ctx context.Context, id string) (SuggestedModule, error) {
+	var m SuggestedModule
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, command_id, agent_id, module_name, scontext, tcontext, tclass, te_text, pp_base64,
+			status, error_message, created_at, reviewed_at, reviewed_by
+		FROM suggested_modules WHERE id = $1
+	`, id).Scan(&m.ID, &m.CommandID, &m.AgentID, &m.ModuleName, &m.SContext, &m.TContext, &m.TClass,
+		&m.TEText, &m.PPBase64, &m.Status, &m.ErrorMessage, &m.CreatedAt, &m.ReviewedAt, &m.ReviewedBy)
+	if err != nil {
+		return SuggestedModule{}, fmt.Errorf("get suggested module %s: %w", id, err)
+	}
+	return m, nil
+}
+
+// ReviewSuggestedModule records a human decision (status is "approved" or
+// "rejected") — the caller is responsible for actually dispatching the
+// install_module command on approval; this just records the decision.
+func (s *Store) ReviewSuggestedModule(ctx context.Context, id, status, reviewedBy string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE suggested_modules SET status = $2, reviewed_at = now(), reviewed_by = $3
+		WHERE id = $1
+	`, id, status, reviewedBy)
+	if err != nil {
+		return fmt.Errorf("review suggested module: %w", err)
+	}
+	return nil
+}

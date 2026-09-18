@@ -92,6 +92,28 @@ export interface SelinuxState {
   collected_at?: string;
 }
 
+export interface SuggestedModule {
+  id: string;
+  command_id: string;
+  agent_id: string;
+  module_name: string;
+  scontext: string;
+  tcontext: string;
+  tclass: string;
+  te_text: string;
+  pp_base64?: string;
+  status: "generating" | "pending" | "failed" | "approved" | "rejected" | string;
+  error_message: string;
+  created_at: string;
+  reviewed_at?: string;
+  reviewed_by: string;
+}
+
+export interface SuggestedModuleSearchResult {
+  modules: SuggestedModule[];
+  total: number;
+}
+
 export interface Alert {
   id: string;
   type: string;
@@ -152,6 +174,21 @@ export const api = {
     if (params.days !== undefined) qs.set("days", String(params.days));
     return request<TrendPoint[]>(`/denials/trend?${qs.toString()}`);
   },
+  listSuggestedModules: (params: { status?: string; offset?: number; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.status) qs.set("status", params.status);
+    if (params.offset) qs.set("offset", String(params.offset));
+    qs.set("limit", String(params.limit ?? 20));
+    return request<SuggestedModuleSearchResult>(`/suggested-modules?${qs.toString()}`);
+  },
+  getSuggestedModule: (id: string) => request<SuggestedModule>(`/suggested-modules/${id}`),
+  approveSuggestedModule: (id: string, agentIds: string[]) =>
+    request<{ status: string }>(`/suggested-modules/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ agent_ids: agentIds }),
+    }),
+  rejectSuggestedModule: (id: string) =>
+    request<{ status: string }>(`/suggested-modules/${id}/reject`, { method: "POST", body: JSON.stringify({}) }),
   recentCommands: (params: { agentId?: string; status?: string; offset?: number; limit?: number } = {}) => {
     const qs = new URLSearchParams();
     if (params.agentId) qs.set("agent_id", params.agentId);

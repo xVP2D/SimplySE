@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -134,6 +135,7 @@ func (s *AgentLinkServer) handleIncoming(ctx context.Context, agentID string, ms
 		if err := s.Store.UpdateCommandAck(ctx, ack.GetCommandId(), ack.GetSuccess(), ack.GetMessage()); err != nil {
 			s.Log.Error("update command ack failed", "command_id", ack.GetCommandId(), "error", err)
 		}
+		s.completeSuggestionIfApplicable(ctx, ack)
 
 	case *selinuxv1.AgentMessage_SelinuxInventory:
 		inv := p.SelinuxInventory
@@ -152,6 +154,38 @@ func (s *AgentLinkServer) handleIncoming(ctx context.Context, agentID string, ms
 
 	default:
 		s.Log.Warn("unknown message payload from agent", "agent_id", agentID)
+	}
+}
+
+// completeSuggestionIfApplicable checks whether the acked command was a
+// suggest_module request (see main.go's new_signature handling) and, if
+// so, applies the agent's audit2allow result (or failure) to the tracking
+// row in suggested_modules. A no-op for every other command type.
+func (s *AgentLinkServer) completeSuggestionIfApplicable(ctx context.Context, ack *selinuxv1.CommandAck) {
+	cmd, err := s.Store.GetCommand(ctx, ack.GetCommandId())
+	if err != nil || cmd.Type != "suggest_module" {
+		return
+	}
+
+	var teText, ppBase64, errMsg string
+	success := ack.GetSuccess()
+	if success {
+		var result struct {
+			TE       string `json:"te"`
+			PPBase64 string `json:"pp_base64"`
+		}
+		if err := json.Unmarshal([]byte(ack.GetMessage()), &result); err != nil {
+			success = false
+			errMsg = fmt.Sprintf("failed to parse audit2allow result: %v", err)
+		} else {
+			teText, ppBase64 = result.TE, result.PPBase64
+		}
+	} else {
+		errMsg = ack.GetMessage()
+	}
+
+	if err := s.Store.CompleteSuggestedModule(ctx, ack.GetCommandId(), success, teText, ppBase64, errMsg); err != nil {
+		s.Log.Error("complete suggested module failed", "command_id", ack.GetCommandId(), "error", err)
 	}
 }
 

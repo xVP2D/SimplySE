@@ -64,6 +64,23 @@ func severityFor(o Observation) string {
 	return "medium"
 }
 
+// SuggestedModuleName derives a name safe to hand to `audit2allow -M`
+// (and, on the agent side, to a shell-argument position) from a
+// signature: letters/digits/underscore only, since both audit2allow and
+// the agent's own validation of this same string reject anything else.
+func SuggestedModuleName(o Observation) string {
+	sanitize := func(ctx string) string {
+		var b strings.Builder
+		for _, r := range typeFromContext(ctx) {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+				b.WriteRune(r)
+			}
+		}
+		return b.String()
+	}
+	return fmt.Sprintf("suggested_%s_%s_%s", sanitize(o.SContext), sanitize(o.TContext), sanitize(o.TClass))
+}
+
 type Engine struct {
 	mu    sync.Mutex
 	stats map[string]*signatureStat

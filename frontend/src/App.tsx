@@ -7,6 +7,7 @@ import { Denials } from "./pages/Denials";
 import { Matrix } from "./pages/Matrix";
 import { Deployments } from "./pages/Deployments";
 import { Alerts } from "./pages/Alerts";
+import { Suggestions } from "./pages/Suggestions";
 import { Compliance } from "./pages/Compliance";
 
 export function App() {
@@ -21,6 +22,7 @@ export function App() {
         <Route path="deployments" element={<Deployments />} />
         <Route path="compliance" element={<Compliance />} />
         <Route path="alerts" element={<Alerts />} />
+        <Route path="suggestions" element={<Suggestions />} />
       </Route>
     </Routes>
   );

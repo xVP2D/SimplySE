@@ -32,6 +32,13 @@ const (
 	// or       {"path":"...","context":"system_u:object_r:httpd_sys_content_t:s0","recursive":false}
 	// "context" (full context) wins if both are set.
 	CommandType_COMMAND_TYPE_CHCON CommandType = 4
+	// Generation only — never installs anything (that still only ever
+	// happens via a separate, explicit COMMAND_TYPE_INSTALL_MODULE once a
+	// human approves the suggestion). Runs `audit2allow -M` locally against
+	// the given raw audit lines and returns the result via CommandAck's
+	// `message` field, JSON-encoded as {"te":"...","pp_base64":"..."}.
+	// payload: {"raw_lines":["type=AVC msg=audit(...): ..."],"module_name":"..."}
+	CommandType_COMMAND_TYPE_SUGGEST_MODULE CommandType = 5
 )
 
 // Enum value maps for CommandType.
@@ -42,6 +49,7 @@ var (
 		2: "COMMAND_TYPE_SET_BOOLEAN",
 		3: "COMMAND_TYPE_INSTALL_MODULE",
 		4: "COMMAND_TYPE_CHCON",
+		5: "COMMAND_TYPE_SUGGEST_MODULE",
 	}
 	CommandType_value = map[string]int32{
 		"COMMAND_TYPE_UNSPECIFIED":    0,
@@ -49,6 +57,7 @@ var (
 		"COMMAND_TYPE_SET_BOOLEAN":    2,
 		"COMMAND_TYPE_INSTALL_MODULE": 3,
 		"COMMAND_TYPE_CHCON":          4,
+		"COMMAND_TYPE_SUGGEST_MODULE": 5,
 	}
 )
 
@@ -969,13 +978,14 @@ const file_proto_selinux_v1_agent_proto_rawDesc = "" +
 	"\x04type\x18\x02 \x01(\x0e2\x17.selinux.v1.CommandTypeR\x04type\x12!\n" +
 	"\fpayload_json\x18\x03 \x01(\tR\vpayloadJson\"4\n" +
 	"\fHeartbeatAck\x12$\n" +
-	"\x0eserver_ts_unix\x18\x01 \x01(\x03R\fserverTsUnix*\x9d\x01\n" +
+	"\x0eserver_ts_unix\x18\x01 \x01(\x03R\fserverTsUnix*\xbe\x01\n" +
 	"\vCommandType\x12\x1c\n" +
 	"\x18COMMAND_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15COMMAND_TYPE_SET_MODE\x10\x01\x12\x1c\n" +
 	"\x18COMMAND_TYPE_SET_BOOLEAN\x10\x02\x12\x1f\n" +
 	"\x1bCOMMAND_TYPE_INSTALL_MODULE\x10\x03\x12\x16\n" +
-	"\x12COMMAND_TYPE_CHCON\x10\x042O\n" +
+	"\x12COMMAND_TYPE_CHCON\x10\x04\x12\x1f\n" +
+	"\x1bCOMMAND_TYPE_SUGGEST_MODULE\x10\x052O\n" +
 	"\tAgentLink\x12B\n" +
 	"\aSession\x12\x18.selinux.v1.AgentMessage\x1a\x19.selinux.v1.ServerMessage(\x010\x01B9Z7console-selinux/master/internal/gen/selinuxv1;selinuxv1b\x06proto3"
 

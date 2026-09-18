@@ -110,6 +110,13 @@ enum CommandType {
   // or       {"path":"...","context":"system_u:object_r:httpd_sys_content_t:s0","recursive":false}
   // "context" (full context) wins if both are set.
   COMMAND_TYPE_CHCON = 4;
+  // Generation only — never installs anything (that still only ever
+  // happens via a separate, explicit COMMAND_TYPE_INSTALL_MODULE once a
+  // human approves the suggestion). Runs `audit2allow -M` locally against
+  // the given raw audit lines and returns the result via CommandAck's
+  // `message` field, JSON-encoded as {"te":"...","pp_base64":"..."}.
+  // payload: {"raw_lines":["type=AVC msg=audit(...): ..."],"module_name":"..."}
+  COMMAND_TYPE_SUGGEST_MODULE = 5;
 }
 
 message HeartbeatAck {

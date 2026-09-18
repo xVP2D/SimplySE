@@ -63,6 +63,10 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/denials/top", a.topSignatures)
 	mux.HandleFunc("GET /api/denials/matrix", a.denialMatrix)
 	mux.HandleFunc("GET /api/denials/trend", a.denialTrend)
+	mux.HandleFunc("GET /api/suggested-modules", a.listSuggestedModules)
+	mux.HandleFunc("GET /api/suggested-modules/{id}", a.getSuggestedModule)
+	mux.HandleFunc("POST /api/suggested-modules/{id}/approve", a.approveSuggestedModule)
+	mux.HandleFunc("POST /api/suggested-modules/{id}/reject", a.rejectSuggestedModule)
 	mux.HandleFunc("POST /api/rules/deploy", a.deployRule)
 	mux.HandleFunc("GET /api/commands/{id}", a.getCommand)
 	mux.HandleFunc("GET /api/commands/recent", a.listRecentCommands)
@@ -291,6 +295,98 @@ func (a *API) denialTrend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, points)
+}
+
+func (a *API) listSuggestedModules(w http.ResponseWriter, r *http.Request) {
+	result, err := a.Store.ListSuggestedModules(r.Context(), postgres.ListSuggestedModulesOptions{
+		Status: r.URL.Query().Get("status"),
+		Offset: parseNonNegativeInt(r, "offset", 0),
+		Limit:  parseLimit(r, 20),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *API) getSuggestedModule(w http.ResponseWriter, r *http.Request) {
+	m, err := a.Store.GetSuggestedModule(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+type reviewSuggestedModuleRequest struct {
+	AgentIDs   []string `json:"agent_ids"`
+	ReviewedBy string   `json:"reviewed_by"`
+}
+
+// approveSuggestedModule is the only place a suggested module's pp_base64
+// ever gets pushed anywhere — it dispatches an ordinary install_module
+// command (the same one the manual "deploy a rule" flow uses) to each
+// agent_id the operator picked, then records the approval. There is no
+// path that installs a suggestion without this explicit, human-triggered
+// call.
+func (a *API) approveSuggestedModule(w http.ResponseWriter, r *http.Request) {
+	var req reviewSuggestedModuleRequest
+	_ = json.NewDecoder(r.Body).Decode(&req) // body is optional except for agent_ids, checked below
+	reviewedBy := req.ReviewedBy
+	if reviewedBy == "" {
+		reviewedBy = "operator"
+	}
+	if len(req.AgentIDs) == 0 {
+		writeError(w, http.StatusBadRequest, errors.New("agent_ids is required"))
+		return
+	}
+
+	m, err := a.Store.GetSuggestedModule(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if m.Status != "pending" {
+		writeError(w, http.StatusConflict, fmt.Errorf("suggestion is %q, not pending", m.Status))
+		return
+	}
+
+	payloadJSON, err := json.Marshal(map[string]any{"name": m.ModuleName, "content_base64": m.PPBase64})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	commands := make([]postgres.Command, 0, len(req.AgentIDs))
+	for _, agentID := range req.AgentIDs {
+		cmd, err := server.DispatchCommand(r.Context(), a.Store, a.Hub, agentID, nil, "install_module", string(payloadJSON))
+		if err != nil {
+			a.Log.Error("dispatch install_module for approved suggestion failed", "agent_id", agentID, "error", err)
+			continue
+		}
+		commands = append(commands, cmd)
+	}
+
+	if err := a.Store.ReviewSuggestedModule(r.Context(), m.ID, "approved", reviewedBy); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "approved", "commands": commands})
+}
+
+func (a *API) rejectSuggestedModule(w http.ResponseWriter, r *http.Request) {
+	var req reviewSuggestedModuleRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	reviewedBy := req.ReviewedBy
+	if reviewedBy == "" {
+		reviewedBy = "operator"
+	}
+	if err := a.Store.ReviewSuggestedModule(r.Context(), r.PathValue("id"), "rejected", reviewedBy); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})
 }
 
 type deployRuleRequest struct {

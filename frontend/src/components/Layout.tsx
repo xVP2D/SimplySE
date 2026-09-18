@@ -9,6 +9,7 @@ const navItems = [
   { to: "/deployments", icon: "ph-upload-simple", key: "nav.deployments" },
   { to: "/compliance", icon: "ph-shield-check", key: "nav.compliance" },
   { to: "/alerts", icon: "ph-bell", key: "nav.alerts" },
+  { to: "/suggestions", icon: "ph-magic-wand", key: "nav.suggestions" },
 ];
 
 export function Layout() {

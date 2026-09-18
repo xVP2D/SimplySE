@@ -13,6 +13,7 @@ var commandTypeByName = map[string]selinuxv1.CommandType{
 	"set_boolean":    selinuxv1.CommandType_COMMAND_TYPE_SET_BOOLEAN,
 	"install_module": selinuxv1.CommandType_COMMAND_TYPE_INSTALL_MODULE,
 	"chcon":          selinuxv1.CommandType_COMMAND_TYPE_CHCON,
+	"suggest_module": selinuxv1.CommandType_COMMAND_TYPE_SUGGEST_MODULE,
 }
 
 // DispatchCommand persists a command for agentID and, if the agent is

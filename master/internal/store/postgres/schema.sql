@@ -95,3 +95,31 @@ CREATE TABLE IF NOT EXISTS agent_selinux_state (
     modules_json  JSONB NOT NULL DEFAULT '[]',
     collected_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- audit2allow-assisted policy suggestions: generated automatically on a
+-- new_signature alert (see main.go), *never* applied automatically — a
+-- human must explicitly approve one (POST /api/suggested-modules/{id}/approve)
+-- before its pp_base64 is ever pushed to an agent, and that push itself
+-- reuses the ordinary install_module command/deploy flow, not a shortcut.
+CREATE TABLE IF NOT EXISTS suggested_modules (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    command_id      UUID NOT NULL REFERENCES commands(id),
+    agent_id        TEXT NOT NULL REFERENCES agents(id),
+    module_name     TEXT NOT NULL,
+    scontext        TEXT NOT NULL DEFAULT '',
+    tcontext        TEXT NOT NULL DEFAULT '',
+    tclass          TEXT NOT NULL DEFAULT '',
+    te_text         TEXT NOT NULL DEFAULT '',
+    pp_base64       TEXT NOT NULL DEFAULT '',
+    -- generating (dispatched, awaiting the agent's audit2allow run) ->
+    -- pending (generated, awaiting review) | failed (audit2allow errored)
+    -- -> approved | rejected (human decision, terminal).
+    status          TEXT NOT NULL DEFAULT 'generating',
+    error_message   TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reviewed_at     TIMESTAMPTZ,
+    reviewed_by     TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_suggested_modules_command_id ON suggested_modules (command_id);
+CREATE INDEX IF NOT EXISTS idx_suggested_modules_created_at ON suggested_modules (created_at DESC);

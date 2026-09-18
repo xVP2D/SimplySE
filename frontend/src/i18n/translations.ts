@@ -25,6 +25,7 @@ const en: Dict = {
     deployments: "Deployments",
     compliance: "Compliance",
     alerts: "Alerts",
+    suggestions: "Suggestions",
   },
   brand: {
     subtitle: "Fleet control",
@@ -172,6 +173,25 @@ const en: Dict = {
     acknowledgedTag: "acknowledged",
     empty: "No alerts match this filter.",
   },
+  suggestions: {
+    explainer:
+      "Auto-generated with audit2allow the moment a new denial signature is first seen — never applied automatically. Review the .te text, pick which hosts to push it to, then approve.",
+    allStatuses: "All statuses",
+    status: {
+      pending: "pending review",
+      approved: "approved",
+      rejected: "rejected",
+      failed: "generation failed",
+      generating: "generating…",
+    },
+    pickAgents: "Deploy to:",
+    approveAndDeploy: "Approve & deploy",
+    reject: "Reject",
+    reviewedMeta: "Reviewed {date} by {by}",
+    confirmApprove: "Install this module on {count} agent | Install this module on {count} agents",
+    confirmReject: "Reject this suggestion?",
+    empty: "No suggestions match this filter.",
+  },
 };
 
 const fr: Dict = {
@@ -183,6 +203,7 @@ const fr: Dict = {
     deployments: "Déploiements",
     compliance: "Conformité",
     alerts: "Alertes",
+    suggestions: "Suggestions",
   },
   brand: {
     subtitle: "Fleet control",
@@ -330,6 +351,25 @@ const fr: Dict = {
     acknowledgedTag: "acquittée",
     empty: "Aucune alerte ne correspond à ce filtre.",
   },
+  suggestions: {
+    explainer:
+      "Générées automatiquement avec audit2allow dès qu'une nouvelle signature de denial est vue pour la première fois — jamais appliquées automatiquement. Relis le texte .te, choisis les hôtes cibles, puis approuve.",
+    allStatuses: "Tous les statuts",
+    status: {
+      pending: "en attente de revue",
+      approved: "approuvée",
+      rejected: "rejetée",
+      failed: "génération échouée",
+      generating: "génération…",
+    },
+    pickAgents: "Déployer sur :",
+    approveAndDeploy: "Approuver et déployer",
+    reject: "Rejeter",
+    reviewedMeta: "Revue le {date} par {by}",
+    confirmApprove: "Installer ce module sur {count} agent | Installer ce module sur {count} agents",
+    confirmReject: "Rejeter cette suggestion ?",
+    empty: "Aucune suggestion ne correspond à ce filtre.",
+  },
 };
 
 const es: Dict = {
@@ -341,6 +381,7 @@ const es: Dict = {
     deployments: "Despliegues",
     compliance: "Cumplimiento",
     alerts: "Alertas",
+    suggestions: "Sugerencias",
   },
   brand: {
     subtitle: "Fleet control",
@@ -487,6 +528,25 @@ const es: Dict = {
     acknowledge: "Reconocer",
     acknowledgedTag: "reconocida",
     empty: "Ninguna alerta coincide con este filtro.",
+  },
+  suggestions: {
+    explainer:
+      "Generadas automáticamente con audit2allow en cuanto se ve por primera vez una nueva firma de denegación — nunca se aplican automáticamente. Revisa el texto .te, elige los hosts destino y luego aprueba.",
+    allStatuses: "Todos los estados",
+    status: {
+      pending: "pendiente de revisión",
+      approved: "aprobada",
+      rejected: "rechazada",
+      failed: "generación fallida",
+      generating: "generando…",
+    },
+    pickAgents: "Desplegar en:",
+    approveAndDeploy: "Aprobar y desplegar",
+    reject: "Rechazar",
+    reviewedMeta: "Revisada el {date} por {by}",
+    confirmApprove: "Instalar este módulo en {count} agente | Instalar este módulo en {count} agentes",
+    confirmReject: "¿Rechazar esta sugerencia?",
+    empty: "Ninguna sugerencia coincide con este filtro.",
   },
 };
 
