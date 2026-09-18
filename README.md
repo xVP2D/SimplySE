@@ -251,6 +251,33 @@ connecteur générique) : implémenter l'interface `correlate.Source`
 (`Query(ctx, ip, hostname, around, window) ([]Event, error)`) et
 l'enregistrer dans `cmd/master/main.go`.
 
+## Supprimer une règle appliquée (annulation réelle)
+
+Le bouton **Supprimer** d'une ligne de « Règles appliquées » (page agent) ou
+de la page Déploiements **annule réellement la règle sur la machine**, puis
+retire la ligne une fois que l'agent l'a confirmé (`POST
+/api/commands/{id}/revert`, asynchrone : 202). Ce qui est exécuté :
+
+| Règle | Annulation | Remarque |
+| --- | --- | --- |
+| `install_module` | `semodule -r <nom>` | seulement si le module n'était pas déjà installé avant (sinon on supprimerait un module existant au lieu de restaurer l'ancien) |
+| `chcon` | `restorecon [-R] <chemin>` | remet le contexte **par défaut de la politique**, pas forcément celui d'avant le `chcon` |
+| `set_boolean` | `setsebool -P <nom> <valeur d'avant>` | valeur lue dans le dernier inventaire de l'agent (≤ 60 s) |
+| `set_mode` | `setenforce <mode d'avant>` | mode d'avant lu au dernier heartbeat |
+
+La valeur « d'avant » est mémorisée par le master au moment du déploiement
+(colonne `commands.undo_json`) ; les règles appliquées avant cette
+fonctionnalité n'en ont pas : seuls les `chcon` et les modules générés
+(`suggested_*`) restent annulables, les anciens `set_mode`/`set_boolean`
+apparaissent avec un bouton grisé et l'explication en infobulle. Cas gérés :
+commande jamais appliquée (`failed`/`pending`) → simple retrait de la ligne ;
+agent hors ligne → refusé (409) ; annulation déjà en cours → refusé (409,
+garde SQL d'unicité) ; annulation échouée → la règle et l'erreur restent
+visibles, on peut réessayer ; agent sans réponse → l'annulation expire au
+bout de 2 min et peut être relancée. Côté agent l'annulation est idempotente
+(module déjà retiré / chemin disparu = succès). Deux nouveaux types de
+commande gRPC : `REMOVE_MODULE` et `RESTORECON`.
+
 ## Quarantaine et suppression de denials
 
 Sur la page **Denials**, chaque ligne a un bouton **Quarantaine** et un bouton
