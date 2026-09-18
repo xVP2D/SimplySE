@@ -18,15 +18,18 @@ import (
 // "Collect every denial of a domain": fixing a denial only reveals the next
 // (search, then addname, then create, then open...), because SELinux reports
 // the first refusal of each operation. Making the domain permissive for a
-// bounded time logs all of them at once without blocking anything, and one
-// suggestion then covers the lot.
+// bounded time logs all of them at once without blocking anything, so one
+// suggestion can cover the lot — but generating that suggestion is always a
+// separate, explicit operator action (GenerateSuggestion), same as every
+// other suggestion in this tool: closing the window only counts what was
+// logged, it never proposes anything on its own.
 //
 // It loosens one domain on a real machine, so the way back is the design's
 // centre: the agent puts the domain back by itself at the deadline (state on
 // its own disk, re-armed after a restart), independently of this master.
-// The master's part is bookkeeping and the suggestion: it ends the window on
-// schedule, retries an unconfirmed stop, and generates one suggestion from
-// what was logged.
+// The master's part is bookkeeping: it ends the window on schedule, retries
+// an unconfirmed stop, and closes runs whose agent went silent rather than
+// leaving them open forever.
 
 const (
 	MinCollectSecs     = 30
@@ -148,7 +151,7 @@ func (c *Collector) Start(ctx context.Context, agentID, domain string, dur time.
 	payload, _ := json.Marshal(map[string]any{"domain": domain, "duration_secs": secs})
 	cmd, err := DispatchCommand(ctx, c.Store, c.Hub, agentID, nil, "permissive_start", string(payload))
 	if err != nil {
-		_ = c.Store.FinishCollection(ctx, col.ID, "failed", "could not send the start command: "+err.Error(), nil, 0)
+		_ = c.Store.CloseCollectionWindow(ctx, col.ID, "failed", "could not send the start command: "+err.Error(), 0)
 		return postgres.Collection{}, err
 	}
 	if err := c.Store.SetCollectionStartCommand(ctx, col.ID, cmd.ID); err != nil {
@@ -158,7 +161,7 @@ func (c *Collector) Start(ctx context.Context, agentID, domain string, dur time.
 	return c.Store.GetCollection(ctx, col.ID)
 }
 
-// Stop ends a run early; the suggestion is generated once the agent confirms.
+// Stop ends a run early; the window closes once the agent confirms.
 func (c *Collector) Stop(ctx context.Context, id string) error {
 	col, err := c.Store.GetCollection(ctx, id)
 	if err != nil {
@@ -191,7 +194,7 @@ func (c *Collector) OnAck(ctx context.Context, commandID string, success bool, m
 	switch {
 	case col.StartCommandID != nil && *col.StartCommandID == commandID && col.Status == "starting":
 		if !success {
-			_ = c.Store.FinishCollection(ctx, col.ID, "failed", message, nil, 0)
+			_ = c.Store.CloseCollectionWindow(ctx, col.ID, "failed", message, 0)
 			c.refreshActive(ctx)
 			return
 		}
@@ -199,7 +202,7 @@ func (c *Collector) OnAck(ctx context.Context, commandID string, success bool, m
 		c.Log.Info("domain is now permissive; collecting", "agent_id", col.AgentID, "domain", col.Domain, "detail", message)
 	case col.StopCommandID != nil && *col.StopCommandID == commandID && col.Status == "stopping":
 		if success {
-			c.finalize(ctx, col, "")
+			c.closeWindow(ctx, col, "")
 		}
 		// On failure the runner retries: the domain must not stay loosened.
 	}
@@ -211,31 +214,60 @@ func (c *Collector) refreshActive(ctx context.Context) {
 	}
 }
 
-// finalize turns what was logged into one suggestion and closes the run.
-func (c *Collector) finalize(ctx context.Context, col postgres.Collection, note string) {
-	since := col.StartedAt.Unix() - 10
-	lines, err := c.Search.CollectedLines(ctx, col.AgentID, col.Domain, since, time.Now().Unix()+30, maxCollectedLines)
+// closeWindow ends a run's permissive window (already off on the machine by
+// the time this runs) and counts what it logged. Turning that into a
+// suggestion is a separate, later, explicitly-requested step (see
+// GenerateSuggestion) — nothing is proposed for review without an operator
+// asking for it, same as every other suggestion in this tool.
+func (c *Collector) closeWindow(ctx context.Context, col postgres.Collection, note string) {
+	lines, err := c.Search.CollectedLines(ctx, col.AgentID, col.Domain, col.StartedAt.Unix()-10, time.Now().Unix()+30, maxCollectedLines)
 	if err != nil {
-		_ = c.Store.FinishCollection(ctx, col.ID, "failed", "could not read the collected denials: "+err.Error(), nil, 0)
+		_ = c.Store.CloseCollectionWindow(ctx, col.ID, "failed", "could not read the collected denials: "+err.Error(), 0)
 		c.refreshActive(ctx)
 		return
 	}
-	message := note
-	var suggestionID *string
+	status, message := "collected", note
 	if len(lines) == 0 {
+		status = "done" // nothing to generate a suggestion from
 		message = strings.TrimSpace(message + " Aucun denial collecté pour ce domaine pendant la fenêtre.")
-	} else {
-		sug, err := RequestCollectedSuggestion(ctx, c.Store, c.Hub, col.AgentID, col.Domain, CollectedModuleName(col.Domain, col.StartedAt), lines)
-		if err != nil {
-			_ = c.Store.FinishCollection(ctx, col.ID, "failed", "could not generate the suggestion: "+err.Error(), nil, len(lines))
-			c.refreshActive(ctx)
-			return
-		}
-		suggestionID = &sug.ID
 	}
-	_ = c.Store.FinishCollection(ctx, col.ID, "done", message, suggestionID, len(lines))
+	_ = c.Store.CloseCollectionWindow(ctx, col.ID, status, message, len(lines))
 	c.refreshActive(ctx)
-	c.Log.Info("domain collection finished", "agent_id", col.AgentID, "domain", col.Domain, "distinct_denials", len(lines))
+	c.Log.Info("domain collection window closed", "agent_id", col.AgentID, "domain", col.Domain, "distinct_denials", len(lines))
+}
+
+// ErrCollectionNotReady: this run has no logged denials ready to turn into
+// a suggestion (still in progress, none logged, or a suggestion was already
+// generated for it).
+var ErrCollectionNotReady = errors.New("this collection has nothing ready to generate a suggestion from")
+
+// GenerateSuggestion turns a closed run's logged denials into one
+// suggestion — an explicit operator action (POST /api/collections/{id}/generate),
+// never triggered on its own when the window closes.
+func (c *Collector) GenerateSuggestion(ctx context.Context, id string) (postgres.SuggestedModule, error) {
+	col, err := c.Store.GetCollection(ctx, id)
+	if err != nil {
+		return postgres.SuggestedModule{}, err
+	}
+	if col.Status != "collected" || col.FinishedAt == nil {
+		return postgres.SuggestedModule{}, ErrCollectionNotReady
+	}
+	lines, err := c.Search.CollectedLines(ctx, col.AgentID, col.Domain, col.StartedAt.Unix()-10, col.FinishedAt.Unix()+30, maxCollectedLines)
+	if err != nil {
+		return postgres.SuggestedModule{}, err
+	}
+	if len(lines) == 0 {
+		_ = c.Store.RecordSuggestion(ctx, col.ID, "done", "Aucun denial collecté pour ce domaine pendant la fenêtre.", nil)
+		return postgres.SuggestedModule{}, ErrCollectionNotReady
+	}
+	sug, err := RequestCollectedSuggestion(ctx, c.Store, c.Hub, col.AgentID, col.Domain, CollectedModuleName(col.Domain, col.StartedAt), lines)
+	if err != nil {
+		_ = c.Store.RecordSuggestion(ctx, col.ID, "failed", "could not generate the suggestion: "+err.Error(), nil)
+		return postgres.SuggestedModule{}, err
+	}
+	_ = c.Store.RecordSuggestion(ctx, col.ID, "done", col.Message, &sug.ID)
+	c.Log.Info("domain collection suggestion generated", "agent_id", col.AgentID, "domain", col.Domain, "distinct_denials", len(lines))
+	return sug, nil
 }
 
 // Run drives the runs in progress until ctx ends: ends windows on schedule,
@@ -267,7 +299,7 @@ func (c *Collector) tick(ctx context.Context) {
 			if now.Sub(col.StartedAt) > startConfirmTimeout {
 				// The agent may still have started it: its own deadline
 				// will end that either way.
-				_ = c.Store.FinishCollection(ctx, col.ID, "failed", "l'agent n'a pas confirmé le démarrage", nil, 0)
+				_ = c.Store.CloseCollectionWindow(ctx, col.ID, "failed", "l'agent n'a pas confirmé le démarrage", 0)
 			}
 		case "collecting":
 			if col.EndsAt != nil && !now.Before(*col.EndsAt) {
@@ -280,7 +312,7 @@ func (c *Collector) tick(ctx context.Context) {
 			case sent == nil || now.Sub(*sent) > stopGiveUpAfter:
 				// Still generate the suggestion from what was logged; the
 				// agent's own deadline is what guarantees the way back.
-				c.finalize(ctx, col, "Retour à enforced non confirmé par l'agent (il le fait lui-même à l'échéance).")
+				c.closeWindow(ctx, col, "Retour à enforced non confirmé par l'agent (il le fait lui-même à l'échéance).")
 			case now.Sub(*sent) > stopRetryEvery:
 				if err := c.sendStop(ctx, col); err != nil {
 					c.Log.Warn("resend stop failed", "collection", col.ID, "error", err)

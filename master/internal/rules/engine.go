@@ -113,10 +113,6 @@ func SuggestedModuleName(o Observation) string {
 type Engine struct {
 	mu    sync.Mutex
 	stats map[string]*signatureStat
-
-	// suggested remembers which (agent, signature, permission set) a module
-	// suggestion was already requested for since this process started.
-	suggested map[string]struct{}
 }
 
 type signatureStat struct {
@@ -130,7 +126,7 @@ type signatureStat struct {
 }
 
 func NewEngine() *Engine {
-	return &Engine{stats: make(map[string]*signatureStat), suggested: make(map[string]struct{})}
+	return &Engine{stats: make(map[string]*signatureStat)}
 }
 
 type Observation struct {
@@ -143,29 +139,6 @@ type Observation struct {
 
 func key(o Observation) string {
 	return o.SContext + "\x00" + o.TContext + "\x00" + o.TClass
-}
-
-// NeedsSuggestion reports whether this is the first time, since the master
-// started, that this agent produced this exact (source, target, class,
-// permission set) — i.e. whether a module suggestion should be requested for
-// it. Unlike the "new signature" alert (once per signature, whatever the
-// permissions, and only for the first agent that hits it) this fires again
-// for a new permission set on a known signature and for each further agent,
-// which is what a per-permissions module needs. It is only a cheap
-// in-memory gate: the suggestion request itself dedupes against what
-// already exists, so a master restart re-asking is harmless.
-func (e *Engine) NeedsSuggestion(o Observation) bool {
-	perms := append([]string(nil), o.Perms...)
-	sort.Strings(perms)
-	k := o.AgentID + "\x00" + key(o) + "\x00" + strings.Join(perms, ",")
-
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if _, seen := e.suggested[k]; seen {
-		return false
-	}
-	e.suggested[k] = struct{}{}
-	return true
 }
 
 // Alert is a condition the engine wants surfaced to an operator. Observe

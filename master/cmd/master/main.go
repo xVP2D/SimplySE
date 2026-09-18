@@ -195,21 +195,12 @@ func run(log *slog.Logger) error {
 			}
 		}
 
-		// A (machine, signature, permissions) never seen before is exactly
-		// the case audit2allow assistance is for: generate a suggested
-		// module right away so an operator has something to review without
-		// waiting for it to recur — the same request an operator can also
-		// trigger by hand from a denial row (see server.RequestModuleSuggestion).
-		// Separate from the new-signature alert on purpose: a new permission
-		// on a known signature, or the same signature on another machine,
-		// needs its own suggestion but isn't a "new signature".
-		// Paused for a domain under a "collect all denials" run: that run
-		// produces one suggestion for everything instead.
-		if !collector.Suppresses(m.AgentID, m.SContext) && engine.NeedsSuggestion(obs) {
-			if _, err := server.RequestModuleSuggestion(ctx, pg, hub, m.AgentID, m.SContext, m.TContext, m.TClass, m.RawLine); err != nil {
-				log.Error("request module suggestion failed", "agent_id", m.AgentID, "error", err)
-			}
-		}
+		// Suggestion generation is never automatic: only an explicit
+		// operator action creates one — "Corriger sur cette machine" on a
+		// denial row (server.RequestModuleSuggestion) or "Générer la
+		// suggestion" at the end of a domain collection
+		// (server.Collector.GenerateSuggestion). Observing a denial here
+		// only ever feeds the alert above and the raw event indexed below.
 		return search.IndexAvcEvent(ctx, opensearch.AvcEvent{
 			AgentID:  m.AgentID,
 			TsUnix:   m.TsUnix,

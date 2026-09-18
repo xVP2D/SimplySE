@@ -846,6 +846,7 @@ type Collection struct {
 	StartedAt       time.Time  `json:"started_at"`
 	CollectingSince *time.Time `json:"collecting_since,omitempty"`
 	EndsAt          *time.Time `json:"ends_at,omitempty"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
 	SuggestionID    *string    `json:"suggestion_id,omitempty"`
 	LinesCount      int        `json:"lines_count"`
 	Message         string     `json:"message"`
@@ -859,12 +860,12 @@ type Collection struct {
 var ErrCollectionActive = errors.New("this domain is already being collected on this agent")
 
 const collectionColumns = `id, agent_id, domain, status, duration_secs, created_by, started_at, collecting_since, ends_at,
-	suggestion_id, lines_count, message, start_command_id, stop_command_id, stop_sent_at`
+	finished_at, suggestion_id, lines_count, message, start_command_id, stop_command_id, stop_sent_at`
 
 func scanCollection(row interface{ Scan(...any) error }) (Collection, error) {
 	var c Collection
 	err := row.Scan(&c.ID, &c.AgentID, &c.Domain, &c.Status, &c.DurationSecs, &c.CreatedBy, &c.StartedAt,
-		&c.CollectingSince, &c.EndsAt, &c.SuggestionID, &c.LinesCount, &c.Message,
+		&c.CollectingSince, &c.EndsAt, &c.FinishedAt, &c.SuggestionID, &c.LinesCount, &c.Message,
 		&c.StartCommandID, &c.StopCommandID, &c.StopSentAt)
 	return c, err
 }
@@ -960,8 +961,22 @@ func (s *Store) BeginStopping(ctx context.Context, id, stopCommandID string) err
 		WHERE id = $1 AND status IN ('collecting', 'stopping')`, id, stopCommandID)
 }
 
-func (s *Store) FinishCollection(ctx context.Context, id, status, message string, suggestionID *string, lines int) error {
-	return s.exec(ctx, "finish collection", `
-		UPDATE domain_collections SET status = $2, message = $3, suggestion_id = $4, lines_count = $5
-		WHERE id = $1 AND status IN ('starting', 'collecting', 'stopping')`, id, status, message, suggestionID, lines)
+// CloseCollectionWindow ends the collecting/stopping phase: the window is
+// shut (permissive mode is off again, or the run failed before/during
+// that), and finished_at is fixed so a suggestion generated later still
+// reads exactly what was logged during the run. Never sets suggestion_id:
+// generating one is a separate, explicit step (see RecordSuggestion).
+func (s *Store) CloseCollectionWindow(ctx context.Context, id, status, message string, lines int) error {
+	return s.exec(ctx, "close collection window", `
+		UPDATE domain_collections SET status = $2, message = $3, lines_count = $4, finished_at = now()
+		WHERE id = $1 AND status IN ('starting', 'collecting', 'stopping')`, id, status, message, lines)
+}
+
+// RecordSuggestion attaches the suggestion generated from a "collected" run
+// (status -> "done"), or records that generating one failed (status ->
+// "failed", leaving lines_count as-is so the operator can retry).
+func (s *Store) RecordSuggestion(ctx context.Context, id, status, message string, suggestionID *string) error {
+	return s.exec(ctx, "record collection suggestion", `
+		UPDATE domain_collections SET status = $2, message = $3, suggestion_id = $4
+		WHERE id = $1 AND status = 'collected'`, id, status, message, suggestionID)
 }

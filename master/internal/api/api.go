@@ -94,6 +94,7 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/collections", a.listCollections)
 	mux.HandleFunc("POST /api/collections", a.startCollection)
 	mux.HandleFunc("POST /api/collections/{id}/stop", a.stopCollection)
+	mux.HandleFunc("POST /api/collections/{id}/generate", a.generateCollectionSuggestion)
 	mux.HandleFunc("POST /api/rules/deploy", a.deployRule)
 	mux.HandleFunc("GET /api/commands/{id}", a.getCommand)
 	mux.HandleFunc("GET /api/commands/recent", a.listRecentCommands)
@@ -640,6 +641,28 @@ func (a *API) stopCollection(w http.ResponseWriter, r *http.Request) {
 	case err == nil:
 		writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopping"})
 	case errors.Is(err, server.ErrCollectionState):
+		writeError(w, http.StatusConflict, err)
+	case errors.Is(err, sql.ErrNoRows):
+		writeError(w, http.StatusNotFound, err)
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
+}
+
+// generateCollectionSuggestion turns a closed collection's logged denials
+// into one suggestion — the explicit step an operator takes when ready;
+// closing the collection window never does this on its own.
+func (a *API) generateCollectionSuggestion(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, errors.New("invalid collection id"))
+		return
+	}
+	sug, err := a.Collector.GenerateSuggestion(r.Context(), id)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusCreated, sug)
+	case errors.Is(err, server.ErrCollectionNotReady):
 		writeError(w, http.StatusConflict, err)
 	case errors.Is(err, sql.ErrNoRows):
 		writeError(w, http.StatusNotFound, err)

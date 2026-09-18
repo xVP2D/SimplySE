@@ -159,21 +159,29 @@ CREATE TABLE IF NOT EXISTS integration_settings (
 );
 
 -- "Collect every denial of a domain" runs (see internal/server/collect.go):
--- the domain is made permissive on one agent for a bounded time, then one
--- suggestion covering everything logged is generated. One active run per
--- (agent, domain); finished rows stay as an audit trail of when a domain
--- was loosened, by whom and for how long.
+-- the domain is made permissive on one agent for a bounded time so
+-- everything it hits gets logged instead of one denial at a time. One
+-- active run per (agent, domain); finished rows stay as an audit trail of
+-- when a domain was loosened, by whom and for how long.
 CREATE TABLE IF NOT EXISTS domain_collections (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agent_id          TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     domain            TEXT NOT NULL,
-    -- starting -> collecting -> stopping -> done | failed
+    -- starting -> collecting -> stopping -> collected -> done | failed.
+    -- "collected": the window is closed and lines_count denials were
+    -- logged, but turning them into a suggestion is a separate, explicit
+    -- operator action (POST .../generate) — never automatic, same as
+    -- every other suggestion in this tool.
     status            TEXT NOT NULL DEFAULT 'starting',
     duration_secs     INT NOT NULL,
     created_by        TEXT NOT NULL DEFAULT 'operator',
     started_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     collecting_since  TIMESTAMPTZ,
     ends_at           TIMESTAMPTZ,
+    -- Fixed the moment the window actually closes, so a suggestion
+    -- generated later (possibly much later) still reads exactly what was
+    -- logged during the run, not whatever else has happened since.
+    finished_at       TIMESTAMPTZ,
     start_command_id  UUID,
     stop_command_id   UUID,
     stop_sent_at      TIMESTAMPTZ,
@@ -181,6 +189,7 @@ CREATE TABLE IF NOT EXISTS domain_collections (
     lines_count       INT NOT NULL DEFAULT 0,
     message           TEXT NOT NULL DEFAULT ''
 );
+ALTER TABLE domain_collections ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_domain_collections_one_active
     ON domain_collections (agent_id, domain)
     WHERE status IN ('starting', 'collecting', 'stopping');

@@ -202,7 +202,7 @@ export interface Collection {
   id: string;
   agent_id: string;
   domain: string;
-  status: "starting" | "collecting" | "stopping" | "done" | "failed" | string;
+  status: "starting" | "collecting" | "stopping" | "collected" | "done" | "failed" | string;
   duration_secs: number;
   created_by: string;
   started_at: string;
@@ -264,6 +264,7 @@ export const api = {
       body: JSON.stringify({ agent_id: params.agentId, domain: params.domain, duration_secs: params.durationSecs }),
     }),
   stopCollection: (id: string) => request<{ status: string }>(`/collections/${id}/stop`, { method: "POST", body: JSON.stringify({}) }),
+  generateCollectionSuggestion: (id: string) => request<SuggestedModule>(`/collections/${id}/generate`, { method: "POST", body: JSON.stringify({}) }),
   quarantineDenial: (d: { index: string; id: string }) =>
     request<{ status: string }>("/denials/quarantine", { method: "POST", body: JSON.stringify({ index: d.index, id: d.id }) }),
   restoreDenial: (d: { index: string; id: string }) =>

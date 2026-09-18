@@ -13,6 +13,8 @@ function statusTag(status: string): string {
       return "tag tag-outline";
     case "collecting":
       return "tag tag-accent-2";
+    case "collected":
+      return "tag tag-accent-2";
     default:
       return "tag tag-neutral";
   }
@@ -51,6 +53,16 @@ export function CollectionsPanel({ agentId, refreshKey }: { agentId: string; ref
     }
   };
 
+  const generate = async (id: string) => {
+    setBusyId(id);
+    try {
+      await api.generateCollectionSuggestion(id);
+      load();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   if (collections.length === 0) return null;
 
   return (
@@ -78,7 +90,7 @@ export function CollectionsPanel({ agentId, refreshKey }: { agentId: string; ref
                 {t("collect.until", { time: new Date(c.ends_at).toLocaleTimeString(locale) })}
               </span>
             )}
-            {c.status === "done" && (
+            {(c.status === "collected" || c.status === "done") && (
               <span style={{ color: "var(--color-neutral-500)" }}>
                 {t("collect.linesCollected", { count: c.lines_count })}
               </span>
@@ -94,6 +106,11 @@ export function CollectionsPanel({ agentId, refreshKey }: { agentId: string; ref
             {ACTIVE.has(c.status) && (
               <button type="button" className="btn btn-ghost" disabled={busyId === c.id} onClick={() => stop(c.id)}>
                 {busyId === c.id ? "…" : t("collect.stopButton")}
+              </button>
+            )}
+            {c.status === "collected" && (
+              <button type="button" className="btn btn-ghost" disabled={busyId === c.id} onClick={() => generate(c.id)}>
+                {busyId === c.id ? "…" : t("collect.generateButton")}
               </button>
             )}
           </div>

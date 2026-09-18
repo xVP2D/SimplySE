@@ -52,26 +52,3 @@ func TestModuleNameIsSafeAndFitsTheAgentLimit(t *testing.T) {
 		t.Fatalf("unsanitized: %q", got)
 	}
 }
-
-func TestNeedsSuggestionFiresOncePerAgentSignatureAndPermissionSet(t *testing.T) {
-	e := NewEngine()
-	if !e.NeedsSuggestion(obs("a", "write")) {
-		t.Fatal("first sight must need a suggestion")
-	}
-	if e.NeedsSuggestion(obs("a", "write")) {
-		t.Fatal("same agent, signature and permissions again must not")
-	}
-	if !e.NeedsSuggestion(obs("a", "search")) {
-		t.Fatal("a new permission on a known signature must need one")
-	}
-	if !e.NeedsSuggestion(obs("b", "write")) {
-		t.Fatal("the same signature on another agent must need one")
-	}
-	// Permission order is not a new permission set.
-	if !e.NeedsSuggestion(obs("a", "read", "write")) {
-		t.Fatal("first sight of {read,write}")
-	}
-	if e.NeedsSuggestion(obs("a", "write", "read")) {
-		t.Fatal("{write,read} is the same set as {read,write}")
-	}
-}
