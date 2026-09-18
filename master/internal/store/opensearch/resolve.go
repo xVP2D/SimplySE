@@ -204,3 +204,31 @@ func (s *Store) CollectedLines(ctx context.Context, agentID, domain string, sinc
 	}
 	return lines, nil
 }
+
+// CountCollected returns how many distinct denials (by signature) a domain
+// has logged for one agent in [sinceUnix, untilUnix] — a cheap live count for
+// a collection run still in progress. CollectedLines does more work (a
+// sample raw line per signature too) and is only used once the window closes.
+func (s *Store) CountCollected(ctx context.Context, agentID, domain string, sinceUnix, untilUnix int64) (int, error) {
+	body := map[string]any{
+		"size": 0,
+		"query": map[string]any{"bool": map[string]any{"filter": []map[string]any{
+			{"term": map[string]any{"agent_id.keyword": agentID}},
+			{"wildcard": map[string]any{"scontext.keyword": "*:" + domain + ":*"}},
+			{"range": map[string]any{"ts_unix": map[string]any{"gte": sinceUnix, "lte": untilUnix}}},
+			{"exists": map[string]any{"field": "sig"}},
+		}}},
+		"aggs": map[string]any{"distinct": map[string]any{"cardinality": map[string]any{"field": "sig.keyword"}}},
+	}
+	var parsed struct {
+		Aggregations struct {
+			Distinct struct {
+				Value int `json:"value"`
+			} `json:"distinct"`
+		} `json:"aggregations"`
+	}
+	if err := s.runAggregation(ctx, body, &parsed); err != nil {
+		return 0, err
+	}
+	return parsed.Aggregations.Distinct.Value, nil
+}

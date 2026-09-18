@@ -596,6 +596,12 @@ func (a *API) listCollections(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	// lines_count is otherwise only set once a run's window closes; while
+	// one is actively collecting, recompute it live so the dashboard can
+	// show a real-time count instead of a frozen 0.
+	for i, col := range list {
+		list[i].LinesCount = a.Collector.LiveCount(r.Context(), col)
+	}
 	writeJSON(w, http.StatusOK, list)
 }
 

@@ -11,6 +11,7 @@ const navItems = [
   { to: "/compliance", icon: "ph-shield-check", key: "nav.compliance" },
   { to: "/alerts", icon: "ph-bell", key: "nav.alerts" },
   { to: "/suggestions", icon: "ph-magic-wand", key: "nav.suggestions" },
+  { to: "/collections", icon: "ph-funnel", key: "nav.collections" },
   { to: "/wiki", icon: "ph-book-open", key: "nav.wiki" },
   { to: "/settings", icon: "ph-gear", key: "nav.settings" },
 ];

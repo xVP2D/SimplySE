@@ -11,6 +11,7 @@ import { Suggestions } from "./pages/Suggestions";
 import { Compliance } from "./pages/Compliance";
 import { Wiki } from "./pages/Wiki";
 import { Settings } from "./pages/Settings";
+import { Collections } from "./pages/Collections";
 
 export function App() {
   return (
@@ -28,6 +29,7 @@ export function App() {
         <Route path="suggestions" element={<Suggestions />} />
         <Route path="wiki" element={<Wiki />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="collections" element={<Collections />} />
       </Route>
     </Routes>
   );

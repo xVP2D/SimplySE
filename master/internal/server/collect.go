@@ -324,3 +324,18 @@ func (c *Collector) tick(ctx context.Context) {
 	// is swapped in one step (never emptied first).
 	c.refreshActive(ctx)
 }
+
+// LiveCount reports how many distinct denials a still-running collection has
+// logged so far, for a live progress display. Returns the already-final
+// lines_count for a run that isn't actively collecting (nothing left to
+// recompute), so callers can use this unconditionally.
+func (c *Collector) LiveCount(ctx context.Context, col postgres.Collection) int {
+	if col.Status != "collecting" && col.Status != "stopping" {
+		return col.LinesCount
+	}
+	n, err := c.Search.CountCollected(ctx, col.AgentID, col.Domain, col.StartedAt.Unix()-10, time.Now().Unix()+5)
+	if err != nil {
+		return col.LinesCount
+	}
+	return n
+}
