@@ -108,10 +108,16 @@ func (s *Store) UnresolvedProbes(ctx context.Context, agentID string, perAgent i
 // resolvedField. Returns how many events were flagged.
 func (s *Store) MarkResolved(ctx context.Context, agentID, sig string) (int64, error) {
 	body, err := json.Marshal(map[string]any{
-		"query": map[string]any{"bool": map[string]any{"filter": []map[string]any{
-			{"term": map[string]any{"agent_id.keyword": agentID}},
-			{"term": map[string]any{"sig.keyword": sig}},
-		}}},
+		"query": map[string]any{"bool": map[string]any{
+			"filter": []map[string]any{
+				{"term": map[string]any{"agent_id.keyword": agentID}},
+				{"term": map[string]any{"sig.keyword": sig}},
+			},
+			// Already-resolved events are left alone, so a second, overlapping
+			// check (rule ack + periodic sweep) reports 0 instead of logging
+			// the same resolution twice.
+			"must_not": []map[string]any{{"term": map[string]any{resolvedField: true}}},
+		}},
 		"script": map[string]any{
 			"lang":   "painless",
 			"source": "ctx._source.resolved = true; ctx._source.resolved_at = params.now",
