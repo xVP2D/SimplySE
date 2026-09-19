@@ -112,6 +112,10 @@ CREATE TABLE IF NOT EXISTS agent_selinux_state (
     collected_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE agent_selinux_state ADD COLUMN IF NOT EXISTS file_hashes_json JSONB NOT NULL DEFAULT '{}';
+-- Confined domains with a process running under them at the last inventory
+-- (see agent's selinux_info::collect_active_domains) — what a "scan every
+-- rule on this machine" run can offer to make permissive one at a time.
+ALTER TABLE agent_selinux_state ADD COLUMN IF NOT EXISTS domains_json JSONB NOT NULL DEFAULT '[]';
 
 -- audit2allow-assisted policy suggestions: generated automatically on a
 -- new_signature alert (see main.go), *never* applied automatically — a
@@ -190,6 +194,12 @@ CREATE TABLE IF NOT EXISTS domain_collections (
     message           TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE domain_collections ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
+-- Non-null groups every domain started together by one "scan every rule on
+-- this machine" run (see server.Collector.StartScan), so the dashboard can
+-- show and stop/generate them as one unit; null for an ordinary single-domain
+-- collection.
+ALTER TABLE domain_collections ADD COLUMN IF NOT EXISTS scan_id UUID;
+CREATE INDEX IF NOT EXISTS idx_domain_collections_scan_id ON domain_collections (scan_id) WHERE scan_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_domain_collections_one_active
     ON domain_collections (agent_id, domain)
     WHERE status IN ('starting', 'collecting', 'stopping');

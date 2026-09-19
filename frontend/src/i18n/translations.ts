@@ -40,7 +40,7 @@ const en: Dict = {
     },
   },
   navDesc: {
-    charts: "Explore the history as charts: pick data, a period and one of 45 chart types.",
+    charts: "Explore the history as charts: pick data, a period and one of 47 chart types.",
     dashboard: "Fleet health at a glance, arranged the way you want.",
     agents: "Every enrolled machine, its SELinux mode and last check-in.",
     compliance: "How well each machine passes the baseline checks.",
@@ -579,6 +579,16 @@ const en: Dict = {
       failed: "failed",
     },
   },
+  scan: {
+    startButton: "Scan the whole machine ({count})",
+    noDomainsYet: "Waiting for the agent's first inventory of its active domains",
+    confirmStart:
+      "Make all {count} active domains on {host} temporarily permissive for {minutes} min to log every denial across the whole machine, then generate one suggestion per domain? Each one goes back to enforced on its own even if this fails.",
+    nothingStarted: "No domain could be started (all are already being collected, or none are known yet).",
+    groupTitle: "Machine scan ({count} domains)",
+    stopAllButton: "Stop all",
+    generateAllButton: "Generate {count} suggestions",
+  },
   settings: {
     explainer:
       "Connect an already-deployed SIEM/EDR/monitoring tool (Wazuh, Suricata via an ELK-family stack, LibreNMS…) so denials can be correlated on demand against what it already saw around the same time — nothing is bulk-ingested or duplicated here, only queried live when you open an agent's correlation panel. Saving takes effect immediately, no restart needed.",
@@ -632,7 +642,7 @@ const fr: Dict = {
     },
   },
   navDesc: {
-    charts: "Explorez l'historique en graphiques : choisissez des données, une période et un type de graphique parmi 45.",
+    charts: "Explorez l'historique en graphiques : choisissez des données, une période et un type de graphique parmi 47.",
     dashboard: "L'état du parc en un coup d'œil, disposé comme vous le voulez.",
     agents: "Chaque machine enrôlée, son mode SELinux et sa dernière activité.",
     compliance: "Le résultat des vérifications de base, machine par machine.",
@@ -1171,6 +1181,16 @@ const fr: Dict = {
       failed: "échouée",
     },
   },
+  scan: {
+    startButton: "Scanner toute la machine ({count})",
+    noDomainsYet: "En attente du premier inventaire des domaines actifs de l'agent",
+    confirmStart:
+      "Rendre temporairement permissifs les {count} domaines actifs sur {host} pendant {minutes} min pour journaliser tous les denials de la machine, puis générer une suggestion par domaine ? Chacun revient à enforced tout seul même en cas d'échec.",
+    nothingStarted: "Aucun domaine n'a pu être démarré (tous sont déjà en cours de collecte, ou aucun n'est encore connu).",
+    groupTitle: "Scan machine ({count} domaines)",
+    stopAllButton: "Tout arrêter",
+    generateAllButton: "Générer {count} suggestions",
+  },
   settings: {
     explainer:
       "Connectez un outil SIEM/EDR/supervision déjà déployé (Wazuh, Suricata via une stack ELK, LibreNMS…) pour corréler les dénis à la demande avec ce qu'il a déjà vu au même moment — rien n'est ingéré en masse ni dupliqué ici, seulement interrogé en direct à l'ouverture du panneau de corrélation d'un agent. L'enregistrement prend effet immédiatement, sans redémarrage.",
@@ -1224,7 +1244,7 @@ const es: Dict = {
     },
   },
   navDesc: {
-    charts: "Explora el historial en gráficos: elige datos, un período y uno de los 45 tipos de gráfico.",
+    charts: "Explora el historial en gráficos: elige datos, un período y uno de los 47 tipos de gráfico.",
     dashboard: "El estado de la flota de un vistazo, organizado a tu manera.",
     agents: "Cada máquina registrada, su modo SELinux y su última actividad.",
     compliance: "El resultado de las verificaciones básicas, máquina por máquina.",
@@ -1762,6 +1782,16 @@ const es: Dict = {
       done: "terminada",
       failed: "fallida",
     },
+  },
+  scan: {
+    startButton: "Escanear toda la máquina ({count})",
+    noDomainsYet: "Esperando el primer inventario de dominios activos del agente",
+    confirmStart:
+      "¿Hacer temporalmente permisivos los {count} dominios activos en {host} durante {minutes} min para registrar todas las denegaciones de la máquina, y generar una sugerencia por dominio? Cada uno vuelve a enforced por sí solo aunque esto falle.",
+    nothingStarted: "No se pudo iniciar ningún dominio (todos ya se están recolectando, o ninguno es conocido aún).",
+    groupTitle: "Escaneo de máquina ({count} dominios)",
+    stopAllButton: "Detener todo",
+    generateAllButton: "Generar {count} sugerencias",
   },
   settings: {
     explainer:

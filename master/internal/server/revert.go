@@ -54,7 +54,10 @@ type RevertInfo struct {
 
 var (
 	ErrCommandNotFound = errors.New("command not found")
-	ErrAgentOffline    = errors.New("the agent is offline: an undo can only be sent to a connected agent")
+	// ErrAgentOffline: shared across every action that needs a live stream to
+	// the agent (an undo, a domain collection, a machine scan) — keep the
+	// wording generic, since it surfaces verbatim in each of their API errors.
+	ErrAgentOffline = errors.New("the agent is not connected")
 )
 
 // NotRevertibleError carries the Reason so the API can explain it.

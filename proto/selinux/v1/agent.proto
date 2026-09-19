@@ -95,6 +95,12 @@ message SelinuxInventory {
   // hand-editing /etc/selinux/config or running semanage fcontext -a
   // outside this tool).
   map<string, string> file_hashes = 5;
+  // Distinct SELinux domains (process types) with at least one process
+  // running under them right now, from /proc/*/attr/current — the
+  // population a "scan every rule on this machine" run can make permissive
+  // one at a time (see CollectionScan): a domain nothing runs under
+  // produces no denials either way, so it is left out.
+  repeated string active_domains = 6;
 }
 
 // ---- master -> agent ----

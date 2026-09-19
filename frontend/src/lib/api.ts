@@ -99,6 +99,11 @@ export interface SelinuxState {
   booleans: SelinuxBoolean[];
   modules: SelinuxModule[];
   file_hashes: Record<string, string>;
+  // Confined domains with a process running under them at the last
+  // inventory — what "scan every rule on this machine" can offer to make
+  // permissive one at a time. Empty until the agent has sent its first
+  // inventory snapshot.
+  domains: string[];
   collected_at?: string;
 }
 
@@ -228,6 +233,17 @@ export interface Collection {
   suggestion_id?: string;
   lines_count: number;
   message: string;
+  // Non-null groups this run with every other domain a "scan every rule on
+  // this machine" run started together.
+  scan_id?: string;
+}
+
+export interface ScanStartResult {
+  scan_id: string;
+  collections: Collection[];
+  // Domains this agent reported as active but that could not be included
+  // (already being collected, invalid, or over the per-scan cap).
+  skipped: string[];
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -285,6 +301,12 @@ export const api = {
     }),
   stopCollection: (id: string) => request<{ status: string }>(`/collections/${id}/stop`, { method: "POST", body: JSON.stringify({}) }),
   generateCollectionSuggestion: (id: string) => request<SuggestedModule>(`/collections/${id}/generate`, { method: "POST", body: JSON.stringify({}) }),
+  startScan: (params: { agentId: string; durationSecs: number }) =>
+    request<ScanStartResult>("/scans", {
+      method: "POST",
+      body: JSON.stringify({ agent_id: params.agentId, duration_secs: params.durationSecs }),
+    }),
+  stopScan: (scanId: string) => request<{ status: string; domains: number }>(`/scans/${scanId}/stop`, { method: "POST", body: JSON.stringify({}) }),
   quarantineDenial: (d: { index: string; id: string }) =>
     request<{ status: string }>("/denials/quarantine", { method: "POST", body: JSON.stringify({ index: d.index, id: d.id }) }),
   restoreDenial: (d: { index: string; id: string }) =>

@@ -717,7 +717,13 @@ type SelinuxInventory struct {
 	// previous snapshot to catch a manual, untracked change (e.g. someone
 	// hand-editing /etc/selinux/config or running semanage fcontext -a
 	// outside this tool).
-	FileHashes    map[string]string `protobuf:"bytes,5,rep,name=file_hashes,json=fileHashes,proto3" json:"file_hashes,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	FileHashes map[string]string `protobuf:"bytes,5,rep,name=file_hashes,json=fileHashes,proto3" json:"file_hashes,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Distinct SELinux domains (process types) with at least one process
+	// running under them right now, from /proc/*/attr/current — the
+	// population a "scan every rule on this machine" run can make permissive
+	// one at a time (see CollectionScan): a domain nothing runs under
+	// produces no denials either way, so it is left out.
+	ActiveDomains []string `protobuf:"bytes,6,rep,name=active_domains,json=activeDomains,proto3" json:"active_domains,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -783,6 +789,13 @@ func (x *SelinuxInventory) GetModules() []*SelinuxModule {
 func (x *SelinuxInventory) GetFileHashes() map[string]string {
 	if x != nil {
 		return x.FileHashes
+	}
+	return nil
+}
+
+func (x *SelinuxInventory) GetActiveDomains() []string {
+	if x != nil {
+		return x.ActiveDomains
 	}
 	return nil
 }
@@ -1283,14 +1296,15 @@ const file_proto_selinux_v1_agent_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\bR\x05value\"=\n" +
 	"\rSelinuxModule\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\"\xc1\x02\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\"\xe8\x02\n" +
 	"\x10SelinuxInventory\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x17\n" +
 	"\ats_unix\x18\x02 \x01(\x03R\x06tsUnix\x126\n" +
 	"\bbooleans\x18\x03 \x03(\v2\x1a.selinux.v1.SelinuxBooleanR\bbooleans\x123\n" +
 	"\amodules\x18\x04 \x03(\v2\x19.selinux.v1.SelinuxModuleR\amodules\x12M\n" +
 	"\vfile_hashes\x18\x05 \x03(\v2,.selinux.v1.SelinuxInventory.FileHashesEntryR\n" +
-	"fileHashes\x1a=\n" +
+	"fileHashes\x12%\n" +
+	"\x0eactive_domains\x18\x06 \x03(\tR\ractiveDomains\x1a=\n" +
 	"\x0fFileHashesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xcd\x01\n" +

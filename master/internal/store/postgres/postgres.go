@@ -535,16 +535,19 @@ type SelinuxModule struct {
 }
 
 type SelinuxState struct {
-	AgentID     string            `json:"agent_id"`
-	Booleans    []SelinuxBoolean  `json:"booleans"`
-	Modules     []SelinuxModule   `json:"modules"`
-	FileHashes  map[string]string `json:"file_hashes"`
-	CollectedAt *time.Time        `json:"collected_at,omitempty"`
+	AgentID    string            `json:"agent_id"`
+	Booleans   []SelinuxBoolean  `json:"booleans"`
+	Modules    []SelinuxModule   `json:"modules"`
+	FileHashes map[string]string `json:"file_hashes"`
+	// Confined domains with a process running under them at the last
+	// inventory — see the SelinuxInventory proto's active_domains comment.
+	Domains     []string   `json:"domains"`
+	CollectedAt *time.Time `json:"collected_at,omitempty"`
 }
 
 // UpsertSelinuxState overwrites the previous snapshot for agentID — see
 // the SelinuxInventory proto comment for why this isn't append-only.
-func (s *Store) UpsertSelinuxState(ctx context.Context, agentID string, booleans []SelinuxBoolean, modules []SelinuxModule, fileHashes map[string]string, collectedAt time.Time) error {
+func (s *Store) UpsertSelinuxState(ctx context.Context, agentID string, booleans []SelinuxBoolean, modules []SelinuxModule, fileHashes map[string]string, domains []string, collectedAt time.Time) error {
 	booleansJSON, err := json.Marshal(booleans)
 	if err != nil {
 		return fmt.Errorf("marshal booleans: %w", err)
@@ -557,15 +560,23 @@ func (s *Store) UpsertSelinuxState(ctx context.Context, agentID string, booleans
 	if err != nil {
 		return fmt.Errorf("marshal file hashes: %w", err)
 	}
+	if domains == nil {
+		domains = []string{}
+	}
+	domainsJSON, err := json.Marshal(domains)
+	if err != nil {
+		return fmt.Errorf("marshal domains: %w", err)
+	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO agent_selinux_state (agent_id, booleans_json, modules_json, file_hashes_json, collected_at)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO agent_selinux_state (agent_id, booleans_json, modules_json, file_hashes_json, domains_json, collected_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (agent_id) DO UPDATE SET
 			booleans_json = EXCLUDED.booleans_json,
 			modules_json = EXCLUDED.modules_json,
 			file_hashes_json = EXCLUDED.file_hashes_json,
+			domains_json = EXCLUDED.domains_json,
 			collected_at = EXCLUDED.collected_at
-	`, agentID, booleansJSON, modulesJSON, fileHashesJSON, collectedAt)
+	`, agentID, booleansJSON, modulesJSON, fileHashesJSON, domainsJSON, collectedAt)
 	if err != nil {
 		return fmt.Errorf("upsert selinux state: %w", err)
 	}
@@ -576,13 +587,13 @@ func (s *Store) UpsertSelinuxState(ctx context.Context, agentID string, booleans
 // agent hasn't sent an inventory snapshot yet (e.g. just enrolled, or
 // running an older agent build that predates this feature).
 func (s *Store) GetSelinuxState(ctx context.Context, agentID string) (SelinuxState, bool, error) {
-	state := SelinuxState{AgentID: agentID, Booleans: []SelinuxBoolean{}, Modules: []SelinuxModule{}, FileHashes: map[string]string{}}
-	var booleansJSON, modulesJSON, fileHashesJSON []byte
+	state := SelinuxState{AgentID: agentID, Booleans: []SelinuxBoolean{}, Modules: []SelinuxModule{}, FileHashes: map[string]string{}, Domains: []string{}}
+	var booleansJSON, modulesJSON, fileHashesJSON, domainsJSON []byte
 	var collectedAt time.Time
 	err := s.db.QueryRowContext(ctx, `
-		SELECT booleans_json, modules_json, file_hashes_json, collected_at
+		SELECT booleans_json, modules_json, file_hashes_json, domains_json, collected_at
 		FROM agent_selinux_state WHERE agent_id = $1
-	`, agentID).Scan(&booleansJSON, &modulesJSON, &fileHashesJSON, &collectedAt)
+	`, agentID).Scan(&booleansJSON, &modulesJSON, &fileHashesJSON, &domainsJSON, &collectedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return state, false, nil
 	}
@@ -597,6 +608,13 @@ func (s *Store) GetSelinuxState(ctx context.Context, agentID string) (SelinuxSta
 	}
 	if err := json.Unmarshal(fileHashesJSON, &state.FileHashes); err != nil {
 		return SelinuxState{}, false, fmt.Errorf("unmarshal file hashes: %w", err)
+	}
+	// domains_json is a column added after this table existed: an older row
+	// simply has no value for it yet.
+	if len(domainsJSON) > 0 {
+		if err := json.Unmarshal(domainsJSON, &state.Domains); err != nil {
+			return SelinuxState{}, false, fmt.Errorf("unmarshal domains: %w", err)
+		}
 	}
 	state.CollectedAt = &collectedAt
 	return state, true, nil
@@ -850,6 +868,9 @@ type Collection struct {
 	SuggestionID    *string    `json:"suggestion_id,omitempty"`
 	LinesCount      int        `json:"lines_count"`
 	Message         string     `json:"message"`
+	// Non-nil groups this row with every other domain a "scan every rule on
+	// this machine" run started together (see server.Collector.StartScan).
+	ScanID *string `json:"scan_id,omitempty"`
 
 	StartCommandID *string    `json:"-"`
 	StopCommandID  *string    `json:"-"`
@@ -860,21 +881,28 @@ type Collection struct {
 var ErrCollectionActive = errors.New("this domain is already being collected on this agent")
 
 const collectionColumns = `id, agent_id, domain, status, duration_secs, created_by, started_at, collecting_since, ends_at,
-	finished_at, suggestion_id, lines_count, message, start_command_id, stop_command_id, stop_sent_at`
+	finished_at, suggestion_id, lines_count, message, scan_id, start_command_id, stop_command_id, stop_sent_at`
 
 func scanCollection(row interface{ Scan(...any) error }) (Collection, error) {
 	var c Collection
 	err := row.Scan(&c.ID, &c.AgentID, &c.Domain, &c.Status, &c.DurationSecs, &c.CreatedBy, &c.StartedAt,
-		&c.CollectingSince, &c.EndsAt, &c.FinishedAt, &c.SuggestionID, &c.LinesCount, &c.Message,
+		&c.CollectingSince, &c.EndsAt, &c.FinishedAt, &c.SuggestionID, &c.LinesCount, &c.Message, &c.ScanID,
 		&c.StartCommandID, &c.StopCommandID, &c.StopSentAt)
 	return c, err
 }
 
-func (s *Store) CreateCollection(ctx context.Context, agentID, domain string, durationSecs int, by string) (Collection, error) {
+// CreateCollection starts one domain's run. scanID groups it with other runs
+// started by the same "scan every rule on this machine" request — empty for
+// an ordinary single-domain collection.
+func (s *Store) CreateCollection(ctx context.Context, agentID, domain string, durationSecs int, by, scanID string) (Collection, error) {
+	var scanIDArg any
+	if scanID != "" {
+		scanIDArg = scanID
+	}
 	c, err := scanCollection(s.db.QueryRowContext(ctx, `
-		INSERT INTO domain_collections (agent_id, domain, duration_secs, created_by)
-		VALUES ($1, $2, $3, $4)
-		RETURNING `+collectionColumns, agentID, domain, durationSecs, by))
+		INSERT INTO domain_collections (agent_id, domain, duration_secs, created_by, scan_id)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING `+collectionColumns, agentID, domain, durationSecs, by, scanIDArg))
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -938,7 +966,7 @@ func (s *Store) ListCollections(ctx context.Context, agentID string, limit int) 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT dc.id, dc.agent_id, dc.domain, dc.status, dc.duration_secs, dc.created_by, dc.started_at,
 			dc.collecting_since, dc.ends_at, dc.finished_at, dc.suggestion_id, dc.lines_count, dc.message,
-			dc.start_command_id, dc.stop_command_id, dc.stop_sent_at
+			dc.scan_id, dc.start_command_id, dc.stop_command_id, dc.stop_sent_at
 		FROM domain_collections dc
 		LEFT JOIN suggested_modules sm ON sm.id = dc.suggestion_id
 		WHERE ($1 = '' OR dc.agent_id = $1)
@@ -963,6 +991,12 @@ func (s *Store) ListCollections(ctx context.Context, agentID string, limit int) 
 
 func (s *Store) ListActiveCollections(ctx context.Context) ([]Collection, error) {
 	return s.listCollections(ctx, `WHERE status IN ('starting','collecting','stopping') ORDER BY started_at`)
+}
+
+// ListCollectionsByScan returns every domain run started together by one
+// "scan every rule on this machine" request, oldest first.
+func (s *Store) ListCollectionsByScan(ctx context.Context, scanID string) ([]Collection, error) {
+	return s.listCollections(ctx, `WHERE scan_id = $1 ORDER BY started_at`, scanID)
 }
 
 func (s *Store) exec(ctx context.Context, what, query string, args ...any) error {

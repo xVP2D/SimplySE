@@ -230,7 +230,7 @@ export function targetActual(ctx: BuildCtx): ReactNode {
       {row(targetName(ctx), target, ctx.tokens.muted)}
       <span style={{ fontSize: 13, color, fontWeight: 600 }}>
         <i className={`ph ${gap > 0 ? "ph-arrow-up-right" : gap < 0 ? "ph-arrow-down-right" : "ph-equals"}`} aria-hidden /> {gap > 0 ? "+" : gap < 0 ? "-" : ""}
-        {plain(ctx, Math.abs(gap), 1)} {ctx.t(ctx.input.kpi.targetSource === "config" ? "charts.vsTarget" : "charts.vsPrevious")}
+        {fmt(ctx, Math.abs(gap))} {ctx.t(ctx.input.kpi.targetSource === "config" ? "charts.vsTarget" : "charts.vsPrevious")}
       </span>
     </div>
   );
@@ -257,7 +257,7 @@ export function scorecard(ctx: BuildCtx): ReactNode {
             <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{fmt(ctx, c.value)}</span>
             <span style={{ fontSize: 12, color, minWidth: 44, textAlign: "right", whiteSpace: "nowrap" }}>
               <i className={`ph ${dir === "up" ? "ph-arrow-up-right" : dir === "down" ? "ph-arrow-down-right" : "ph-minus"}`} aria-hidden />
-              {abs === null ? "" : ` ${plain(ctx, Math.abs(abs), 0)}`}
+              {abs === null ? "" : ` ${fmt(ctx, Math.abs(abs))}`}
             </span>
           </div>
         );

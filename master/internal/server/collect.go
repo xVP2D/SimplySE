@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,18 @@ import (
 	"console-selinux/master/internal/store/opensearch"
 	"console-selinux/master/internal/store/postgres"
 )
+
+// newScanID is a random RFC 4122 v4 UUID, generated client-side (unlike
+// every domain_collections row's own id, which Postgres assigns): every
+// domain a scan starts needs the *same* value up front to group them, before
+// any row exists yet to ask the database for one.
+func newScanID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
 
 // "Collect every denial of a domain": fixing a denial only reveals the next
 // (search, then addname, then create, then open...), because SELinux reports
@@ -132,17 +145,26 @@ func (c *Collector) markActive(agentID, domain string) {
 // Start makes domain permissive on agentID for dur, after which the agent
 // ends it by itself.
 func (c *Collector) Start(ctx context.Context, agentID, domain string, dur time.Duration, by string) (postgres.Collection, error) {
+	if !ValidCollectDomain(domain) {
+		return postgres.Collection{}, ErrInvalidCollection
+	}
+	return c.startOne(ctx, agentID, domain, dur, by, "")
+}
+
+// startOne is Start's actual work, plus the scanID grouping StartScan needs;
+// Start itself is just this with scanID == "" (an ordinary, ungrouped run).
+func (c *Collector) startOne(ctx context.Context, agentID, domain string, dur time.Duration, by, scanID string) (postgres.Collection, error) {
 	secs := int(dur.Seconds())
 	if secs == 0 {
 		secs = DefaultCollectSecs
 	}
-	if !ValidCollectDomain(domain) || secs < MinCollectSecs || secs > MaxCollectSecs || agentID == "" {
+	if secs < MinCollectSecs || secs > MaxCollectSecs || agentID == "" {
 		return postgres.Collection{}, ErrInvalidCollection
 	}
 	if !c.Hub.IsConnected(agentID) {
 		return postgres.Collection{}, ErrAgentOffline
 	}
-	col, err := c.Store.CreateCollection(ctx, agentID, domain, secs, by)
+	col, err := c.Store.CreateCollection(ctx, agentID, domain, secs, by, scanID)
 	if err != nil {
 		return postgres.Collection{}, err
 	}
@@ -159,6 +181,116 @@ func (c *Collector) Start(ctx context.Context, agentID, domain string, dur time.
 	}
 	c.Log.Warn("domain collection requested: the domain will be permissive on the agent", "agent_id", agentID, "domain", domain, "seconds", secs, "by", by)
 	return c.Store.GetCollection(ctx, col.ID)
+}
+
+const (
+	// maxScanDomains bounds how many domains one "scan every rule on this
+	// machine" run makes permissive at once — a very large, unusual machine
+	// still gets a bounded, reviewable blast radius instead of every domain
+	// it has ever run.
+	maxScanDomains = 40
+)
+
+// ErrNoActiveDomains: the agent hasn't reported any confined domain yet (no
+// inventory snapshot received since it enrolled or since this feature was
+// deployed) — there is nothing yet to offer scanning.
+var ErrNoActiveDomains = errors.New("this agent has not reported its active domains yet")
+
+// selectScanDomains is StartScan's domain-picking logic, pulled out as a
+// pure function so it can be tested without a database or a running agent.
+// `active` is which domains this agent is already collecting right now
+// (individually or from an earlier scan) — never restarted, since doing so
+// would silently shorten or extend a run the operator or another scan
+// already started on purpose. Order is preserved from `known`, then capped.
+func selectScanDomains(known []string, active map[string]bool, max int) (selected, skipped []string) {
+	for _, d := range known {
+		if !ValidCollectDomain(d) || active[d] {
+			skipped = append(skipped, d)
+			continue
+		}
+		if len(selected) >= max {
+			skipped = append(skipped, d)
+			continue
+		}
+		selected = append(selected, d)
+	}
+	return selected, skipped
+}
+
+// StartScan makes every domain the agent last reported as active permissive
+// at once, grouped under one scan_id, so their denials can be turned into
+// suggestions machine-wide instead of one domain at a time. Best-effort per
+// domain: one agent-side failure (e.g. a domain manually made non-permissive
+// mid-scan) does not stop the rest.
+func (c *Collector) StartScan(ctx context.Context, agentID string, dur time.Duration, by string) (scanID string, started []postgres.Collection, skipped []string, err error) {
+	if agentID == "" {
+		return "", nil, nil, ErrInvalidCollection
+	}
+	if !c.Hub.IsConnected(agentID) {
+		return "", nil, nil, ErrAgentOffline
+	}
+	state, found, err := c.Store.GetSelinuxState(ctx, agentID)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if !found || len(state.Domains) == 0 {
+		return "", nil, nil, ErrNoActiveDomains
+	}
+
+	c.mu.Lock()
+	active := make(map[string]bool, len(c.active))
+	prefix := agentID + "\x00"
+	for key := range c.active {
+		if d, ok := strings.CutPrefix(key, prefix); ok {
+			active[d] = true
+		}
+	}
+	c.mu.Unlock()
+
+	toStart, skipped := selectScanDomains(state.Domains, active, maxScanDomains)
+	if len(toStart) == 0 {
+		return "", nil, skipped, ErrNoActiveDomains
+	}
+
+	scanID = newScanID()
+	for _, domain := range toStart {
+		col, startErr := c.startOne(ctx, agentID, domain, dur, by, scanID)
+		if startErr != nil {
+			c.Log.Warn("scan: could not start collecting this domain", "agent_id", agentID, "domain", domain, "scan_id", scanID, "error", startErr)
+			skipped = append(skipped, domain)
+			continue
+		}
+		started = append(started, col)
+	}
+	if len(started) == 0 {
+		return "", nil, skipped, ErrInvalidCollection
+	}
+	c.Log.Warn("machine scan requested: several domains will be permissive on the agent", "agent_id", agentID, "scan_id", scanID, "domains", len(started), "skipped", len(skipped), "by", by)
+	return scanID, started, skipped, nil
+}
+
+// StopScan ends every still-active run in a scan early, the same way Stop
+// ends a single collection — best-effort, so one domain's agent-side hiccup
+// doesn't block the rest from stopping.
+func (c *Collector) StopScan(ctx context.Context, scanID string) (stopped int, err error) {
+	cols, err := c.Store.ListCollectionsByScan(ctx, scanID)
+	if err != nil {
+		return 0, err
+	}
+	if len(cols) == 0 {
+		return 0, ErrCollectionState
+	}
+	for _, col := range cols {
+		if col.Status != "collecting" && col.Status != "starting" {
+			continue
+		}
+		if err := c.sendStop(ctx, col); err != nil {
+			c.Log.Warn("scan stop: could not stop this domain", "collection_id", col.ID, "domain", col.Domain, "error", err)
+			continue
+		}
+		stopped++
+	}
+	return stopped, nil
 }
 
 // Stop ends a run early; the window closes once the agent confirms.

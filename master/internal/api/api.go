@@ -103,6 +103,8 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/collections", a.startCollection)
 	mux.HandleFunc("POST /api/collections/{id}/stop", a.stopCollection)
 	mux.HandleFunc("POST /api/collections/{id}/generate", a.generateCollectionSuggestion)
+	mux.HandleFunc("POST /api/scans", a.startScan)
+	mux.HandleFunc("POST /api/scans/{id}/stop", a.stopScan)
 	mux.HandleFunc("POST /api/rules/deploy", a.deployRule)
 	mux.HandleFunc("GET /api/commands/{id}", a.getCommand)
 	mux.HandleFunc("GET /api/commands/recent", a.listRecentCommands)
@@ -640,6 +642,59 @@ func (a *API) startCollection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("domain must be a plain type name ending in _t (not kernel_t/init_t) and duration_secs between %d and %d", server.MinCollectSecs, server.MaxCollectSecs))
 	case errors.Is(err, server.ErrAgentOffline), errors.Is(err, postgres.ErrCollectionActive):
 		writeError(w, http.StatusConflict, err)
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
+}
+
+type startScanRequest struct {
+	AgentID      string `json:"agent_id"`
+	DurationSecs int    `json:"duration_secs"`
+	By           string `json:"by"`
+}
+
+// startScan makes every domain the agent last reported as active
+// temporarily permissive at once, grouped under one scan, so every rule the
+// machine needs can be worked out from a single run instead of one domain
+// at a time (see server.Collector.StartScan).
+func (a *API) startScan(w http.ResponseWriter, r *http.Request) {
+	var req startScanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	by := req.By
+	if by == "" {
+		by = "operator"
+	}
+	scanID, started, skipped, err := a.Collector.StartScan(r.Context(), req.AgentID, time.Duration(req.DurationSecs)*time.Second, by)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusAccepted, map[string]any{"scan_id": scanID, "collections": started, "skipped": skipped})
+	case errors.Is(err, server.ErrNoActiveDomains):
+		writeError(w, http.StatusConflict, err)
+	case errors.Is(err, server.ErrAgentOffline):
+		writeError(w, http.StatusConflict, err)
+	case errors.Is(err, server.ErrInvalidCollection):
+		writeError(w, http.StatusBadRequest, err)
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
+}
+
+// stopScan ends every still-active domain of a scan early.
+func (a *API) stopScan(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, errors.New("invalid scan id"))
+		return
+	}
+	stopped, err := a.Collector.StopScan(r.Context(), id)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusAccepted, map[string]any{"status": "stopping", "domains": stopped})
+	case errors.Is(err, server.ErrCollectionState):
+		writeError(w, http.StatusNotFound, err)
 	default:
 		writeError(w, http.StatusInternalServerError, err)
 	}

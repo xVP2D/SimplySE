@@ -6,6 +6,7 @@ import { formatPayload, statusTagClass } from "../lib/commandFormat";
 import { RevertButton } from "../components/RevertButton";
 import { explainDenial, typeFromContext } from "../lib/explainDenial";
 import { CollectDomainButton } from "../components/CollectDomainButton";
+import { ScanMachineButton } from "../components/ScanMachineButton";
 import { CollectionsPanel } from "../components/CollectionsPanel";
 import { randomUUID } from "../lib/uuid";
 import { useTranslation } from "../i18n";
@@ -479,11 +480,19 @@ export function AgentDetail() {
           boxShadow: "var(--shadow-sm)",
         }}
       >
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 11.2, flexWrap: "wrap" }}>
           <h5 style={{ margin: 0, fontSize: 15 }}>{t("agentDetail.logsRecentDenials")}</h5>
-          <Link to={`/denials?agent=${agent.id}`} className="btn btn-ghost">
-            {t("common.viewAll")}
-          </Link>
+          <div style={{ display: "flex", alignItems: "center", gap: 11.2 }}>
+            <ScanMachineButton
+              agentId={agent.id}
+              host={agent.hostname}
+              domainCount={selinuxState?.domains.length ?? 0}
+              onStarted={() => setCollectionsTick((n) => n + 1)}
+            />
+            <Link to={`/denials?agent=${agent.id}`} className="btn btn-ghost">
+              {t("common.viewAll")}
+            </Link>
+          </div>
         </div>
         <CollectionsPanel agentId={agent.id} refreshKey={collectionsTick} />
         <div style={{ overflowX: "auto" }}>

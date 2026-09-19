@@ -367,8 +367,15 @@ supprime ni ne décrémente :
 | Donnée | Comment elle est enregistrée |
 |---|---|
 | Denials | comptés à l'ingestion (`internal/history`), par heure UTC, machine et signature, puis écrits par lots toutes les 10 s |
-| Déploiements, alertes | copiés par des déclencheurs Postgres sur `commands` et `alerts` (aucun déclencheur de suppression) |
+| Signatures | la première heure où chaque signature (source, cible, classe, permissions) a été vue, pour compter les signatures réellement nouvelles jour par jour |
+| Déploiements, alertes | copiés par des déclencheurs Postgres sur `commands` et `alerts` (aucun déclencheur de suppression), avec le message d'erreur et l'auteur de l'acquittement |
 | État du parc | un instantané de chaque machine toutes les 15 min (mode, joignable, politique, alertes ouvertes, score de conformité) |
+
+Au-delà du simple compte, certaines mesures sont des moyennes pondérées par le
+nombre d'observations réelles (le délai d'acquittement d'un déploiement ne
+porte que sur ceux qui ont été acquittés, l'ancienneté d'une alerte ouverte
+que sur celles encore ouvertes) : un groupe sans aucune observation n'apparaît
+pas, plutôt que de s'afficher comme un zéro trompeur.
 
 Au premier démarrage, l'existant est repris : les denials encore présents dans
 OpenSearch (résolus et en quarantaine compris) sont comptés une seule fois — ils
@@ -380,7 +387,7 @@ commence à l'installation. **`HISTORY_RETENTION_DAYS`** (défaut **365**, `0` =
 illimité) purge les lignes plus anciennes ; l'historique est agrégé, il coûte
 très peu.
 
-API : `GET /api/history/{denials|commands|alerts|fleet}?days=30&bucket=day&group=agent,tclass`
+API : `GET /api/history/{denials|commands|alerts|signatures|fleet}?days=30&bucket=day&group=agent,tclass`
 (`bucket` : `hour|day|week|month|none` ; `group` : jusqu'à 4 dimensions d'une
 liste fixe propre à chaque jeu de données, rien n'est jamais interpolé dans le
 SQL ; `from=<secondes unix>` remplace `days` par un début de fenêtre exact — les
@@ -388,9 +395,9 @@ graphiques s'en servent pour que toutes leurs requêtes portent sur les mêmes
 lignes, donc que chaque total soit le même quelle que soit la façon de le
 découper) et `GET /api/history` (depuis quand l'historique existe, par jeu de données).
 
-Côté interface, la page **Graphiques** (menu Vue d'ensemble) montre les 45 types
+Côté interface, la page **Graphiques** (menu Vue d'ensemble) montre les 47 types
 de graphiques (classiques, répartition, KPI, statistiques, corrélation) sur l'un
-de ces quatre jeux de données ; **Ajouter au dashboard** en fait une vignette,
+de ces cinq jeux de données ; **Ajouter au dashboard** en fait une vignette,
 reconfigurable depuis le dashboard en mode « Personnaliser ». Chaque graphique
 peut aussi s'afficher en tableau. Une variation « vs période précédente » n'est
 affichée que si l'historique couvre toute cette période précédente ; sinon la

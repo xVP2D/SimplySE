@@ -164,6 +164,7 @@ func (s *AgentLinkServer) handleIncoming(ctx context.Context, agentID string, ms
 			modules = append(modules, postgres.SelinuxModule{Name: m.GetName(), Version: m.GetVersion()})
 		}
 		fileHashes := inv.GetFileHashes()
+		domains := inv.GetActiveDomains()
 		collectedAt := time.Unix(inv.GetTsUnix(), 0)
 
 		// Fetched before the overwrite so it reflects the *previous*
@@ -171,7 +172,7 @@ func (s *AgentLinkServer) handleIncoming(ctx context.Context, agentID string, ms
 		// actually changed since last time, as opposed to just looking at
 		// its current hash in isolation.
 		prev, hadPrev, prevErr := s.Store.GetSelinuxState(ctx, agentID)
-		if err := s.Store.UpsertSelinuxState(ctx, agentID, booleans, modules, fileHashes, collectedAt); err != nil {
+		if err := s.Store.UpsertSelinuxState(ctx, agentID, booleans, modules, fileHashes, domains, collectedAt); err != nil {
 			s.Log.Error("upsert selinux state failed", "agent_id", agentID, "error", err)
 		}
 		if prevErr == nil && hadPrev {
@@ -247,8 +248,19 @@ func (s *AgentLinkServer) checkDenialsAfterRule(ctx context.Context, agentID, co
 		return
 	}
 	cmd, err := s.Store.GetCommand(ctx, commandID)
-	if err != nil || !ruleTypesThatMayAllow[cmd.Type] {
+	if err != nil {
+		s.Log.Warn("checkDenialsAfterRule: could not read the command back, skipping the immediate re-check", "command_id", commandID, "error", err)
 		return
 	}
+	if !ruleTypesThatMayAllow[cmd.Type] {
+		// By design: set_mode, remove_module and restorecon can only ever
+		// remove or relabel, never grant a new permission, so a denial they
+		// affect can't resolve from this alone — it still gets picked up by
+		// the periodic 30s sweep if the loaded policy happens to allow it
+		// for some other reason.
+		s.Log.Debug("checkDenialsAfterRule: rule type cannot grant access, relying on the periodic sweep instead", "command_id", commandID, "type", cmd.Type)
+		return
+	}
+	s.Log.Info("re-checking this agent's denials right after a rule that may allow something", "agent_id", agentID, "command_id", commandID, "type", cmd.Type)
 	s.Checker.Sweep(ctx, agentID)
 }

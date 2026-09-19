@@ -31,6 +31,13 @@ pub const MAX_SECS: u64 = 3600;
 /// lose its confinement, so the resulting denials would say nothing useful.
 const REFUSED_DOMAINS: &[&str] = &["kernel_t", "init_t"];
 
+/// Whether `domain` is one this tool refuses to make permissive, regardless
+/// of who asks — shared with the active-domain scan (selinux_info) so the
+/// two never drift apart.
+pub fn is_refused(domain: &str) -> bool {
+    REFUSED_DOMAINS.contains(&domain)
+}
+
 /// Serializes read-modify-write of the state file and the semanage calls.
 static LOCK: Mutex<()> = Mutex::const_new(());
 

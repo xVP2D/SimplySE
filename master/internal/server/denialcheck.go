@@ -57,10 +57,22 @@ func (c *DenialChecker) Sweep(ctx context.Context, agentID string) {
 		c.Log.Warn("list unresolved denials failed", "error", err)
 		return
 	}
+	if len(byAgent) == 0 {
+		// Silent by design when nothing is unresolved — but worth a line
+		// when this sweep was asked about one specific agent (right after a
+		// rule), so "nothing happened" is visible instead of indistinguishable
+		// from every other 30s tick that legitimately finds nothing.
+		if agentID != "" {
+			c.Log.Info("denial sweep: no unresolved denial found for this agent", "agent_id", agentID)
+		}
+		return
+	}
 	for agent, probes := range byAgent {
 		if !c.Hub.IsConnected(agent) {
+			c.Log.Debug("denial sweep: agent has unresolved denials but is not connected", "agent_id", agent, "count", len(probes))
 			continue
 		}
+		c.Log.Debug("denial sweep: asking agent to re-check its denials", "agent_id", agent, "count", len(probes))
 		for start := 0; start < len(probes); start += probesPerMessage {
 			end := min(start+probesPerMessage, len(probes))
 			msg := &selinuxv1.CheckDenials{}
@@ -81,8 +93,15 @@ func (c *DenialChecker) Sweep(ctx context.Context, agentID string) {
 // id comes from the authenticated session, never from the message, so an
 // agent can only ever resolve its own denials.
 func (c *DenialChecker) HandleVerdicts(ctx context.Context, agentID string, checked *selinuxv1.DenialsChecked) {
+	total, allowed := 0, 0
 	for _, v := range checked.GetVerdicts() {
-		if !v.GetAllowed() || v.GetId() == "" || len(v.GetId()) > maxSigLen {
+		total++
+		if !v.GetAllowed() {
+			continue
+		}
+		allowed++
+		if v.GetId() == "" || len(v.GetId()) > maxSigLen {
+			c.Log.Warn("denial verdict allowed but has no usable signature, cannot mark it resolved", "agent_id", agentID, "detail", v.GetDetail())
 			continue
 		}
 		n, err := c.Search.MarkResolved(ctx, agentID, v.GetId())
@@ -93,6 +112,9 @@ func (c *DenialChecker) HandleVerdicts(ctx context.Context, agentID string, chec
 		if n > 0 {
 			c.Log.Info("denial resolved: now allowed by the loaded policy", "agent_id", agentID, "events", n, "detail", v.GetDetail(), "signature", v.GetId())
 		}
+	}
+	if total > 0 {
+		c.Log.Debug("denial verdicts received", "agent_id", agentID, "checked", total, "allowed", allowed)
 	}
 }
 

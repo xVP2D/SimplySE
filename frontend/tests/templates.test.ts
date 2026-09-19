@@ -161,3 +161,10 @@ test("the chart widget of a family reads that family's dataset", () => {
     for (const c of tpl.cells)
       if (c.chart) assert.equal(c.chart.dataset, dataset[familyOf(c)]);
 });
+
+test("the charts page's blurb never drifts from the real number of chart types", () => {
+  for (const [locale, dict] of Object.entries(dictionaries)) {
+    const text = (dict as any).navDesc.charts as string;
+    assert.ok(text.includes(String(ALL_CHART_IDS.length)), `${locale}: navDesc.charts says a stale count (real total: ${ALL_CHART_IDS.length})`);
+  }
+});
