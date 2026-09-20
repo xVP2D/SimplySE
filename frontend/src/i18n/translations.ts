@@ -470,7 +470,8 @@ const en: Dict = {
     quarantine: "Quarantine",
     restore: "Restore",
     delete: "Delete",
-    confirmDelete: "Permanently delete this denial?",
+    confirmDelete: "Permanently delete this denial? | Permanently delete these {count} denials?",
+    occurrenceCount: "{count} occurrence | {count} occurrences",
     quarantineExplainer:
       "Denials you set aside. They no longer show in the Denials list, the matrix or the trend chart; restore one to bring it back, or delete it for good.",
     quarantineEmpty: "No quarantined denials.",
@@ -562,6 +563,8 @@ const en: Dict = {
     generateButton: "Generate suggestion",
     pageExplainer:
       "Every domain collection run, live: a progress bar and countdown while it's collecting, a distinct-denial count, and the Generate/Stop actions.",
+    scanSectionLabel: "Collect every SELinux log of one agent (all domains at once)",
+    chooseAgent: "Choose an agent…",
     remaining: "{time} left",
     liveCount: "{count} distinct denial so far | {count} distinct denials so far",
     starting: "starting — waiting for the agent to confirm…",
@@ -1072,7 +1075,8 @@ const fr: Dict = {
     quarantine: "Quarantaine",
     restore: "Restaurer",
     delete: "Supprimer",
-    confirmDelete: "Supprimer définitivement ce denial ?",
+    confirmDelete: "Supprimer définitivement ce denial ? | Supprimer définitivement ces {count} denials ?",
+    occurrenceCount: "{count} occurrence | {count} occurrences",
     quarantineExplainer:
       "Denials mis de côté. Ils n'apparaissent plus dans la liste des denials, la matrice ni la tendance ; restaurez-en un pour le remettre, ou supprimez-le définitivement.",
     quarantineEmpty: "Aucun denial en quarantaine.",
@@ -1164,6 +1168,8 @@ const fr: Dict = {
     generateButton: "Générer la suggestion",
     pageExplainer:
       "Chaque collecte « ce domaine », en direct : barre de progression et compte à rebours pendant la collecte, nombre de denials distincts, et les actions Générer/Arrêter.",
+    scanSectionLabel: "Collecter toutes les logs SELinux d'un agent (tous les domaines d'un coup)",
+    chooseAgent: "Choisir un agent…",
     remaining: "{time} restant",
     liveCount: "{count} denial distinct pour l'instant | {count} denials distincts pour l'instant",
     starting: "démarrage — en attente de confirmation de l'agent…",
@@ -1674,7 +1680,8 @@ const es: Dict = {
     quarantine: "Cuarentena",
     restore: "Restaurar",
     delete: "Eliminar",
-    confirmDelete: "¿Eliminar definitivamente esta denegación?",
+    confirmDelete: "¿Eliminar definitivamente esta denegación? | ¿Eliminar definitivamente estas {count} denegaciones?",
+    occurrenceCount: "{count} ocurrencia | {count} ocurrencias",
     quarantineExplainer:
       "Denegaciones apartadas. Ya no aparecen en la lista de denegaciones, la matriz ni la tendencia; restaure una para recuperarla, o elimínela definitivamente.",
     quarantineEmpty: "No hay denegaciones en cuarentena.",
@@ -1766,6 +1773,8 @@ const es: Dict = {
     generateButton: "Generar sugerencia",
     pageExplainer:
       "Cada recolección de dominio, en vivo: barra de progreso y cuenta regresiva mientras recolecta, número de denegaciones distintas, y las acciones Generar/Detener.",
+    scanSectionLabel: "Recolectar todos los registros SELinux de un agente (todos los dominios a la vez)",
+    chooseAgent: "Elegir un agente…",
     remaining: "quedan {time}",
     liveCount: "{count} denegación distinta hasta ahora | {count} denegaciones distintas hasta ahora",
     starting: "iniciando — esperando confirmación del agente…",

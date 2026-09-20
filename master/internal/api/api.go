@@ -551,9 +551,21 @@ func (a *API) approveSuggestedModule(w http.ResponseWriter, r *http.Request) {
 		}
 		commands = append(commands, cmd)
 	}
-	if len(commands) == 0 {
-		// Nothing was installed: don't leave it looking approved.
+	// Every selected agent already has the module (or an install of it
+	// already under way) and none needed a fresh dispatch: the rule this
+	// suggestion asked for is already applied, so there is nothing left to
+	// do. Treat that as a successful approval instead of erroring forever —
+	// otherwise the suggestion could never leave "pending" and kept
+	// cluttering the list on every later attempt to apply it.
+	alreadyApplied := len(commands) == 0 && len(skipped) > 0 && len(skipped) == len(req.AgentIDs)
+	if len(commands) == 0 && !alreadyApplied {
+		// Nothing was installed and it isn't because it's already there: don't
+		// leave it looking approved.
 		_ = a.Store.ReleaseSuggestionClaim(r.Context(), m.ID)
+	}
+	if len(commands) == 0 && alreadyApplied {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "approved", "commands": commands, "skipped": skipped})
+		return
 	}
 	if len(commands) == 0 && len(skipped) > 0 {
 		writeJSON(w, http.StatusConflict, map[string]any{

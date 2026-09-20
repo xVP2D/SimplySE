@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Agent, type AvcEventHit } from "../lib/api";
 import { useTranslation } from "../i18n";
@@ -7,6 +7,36 @@ import { useAutoRefresh } from "../lib/useAutoRefresh";
 import { CollectDomainButton } from "../components/CollectDomainButton";
 
 const PAGE_SIZE = 25;
+
+// Same underlying rule (same agent, same scontext/tcontext/tclass/perms) is
+// often hit by many raw events in a row — each retry of the same blocked
+// operation logs its own AVC line. Grouping those under one row, with the
+// individual occurrences tucked into a scrollable sub-list, keeps a page of
+// 25 rows from being dominated by near-duplicates.
+function groupKey(d: AvcEventHit): string {
+  return `${d.agent_id}|${d.scontext}|${d.tcontext}|${d.tclass}|${[...d.perms].sort().join(",")}`;
+}
+
+interface DenialGroup {
+  key: string;
+  events: AvcEventHit[];
+}
+
+function groupEvents(events: AvcEventHit[]): DenialGroup[] {
+  const byKey = new Map<string, DenialGroup>();
+  const order: DenialGroup[] = [];
+  for (const d of events) {
+    const key = groupKey(d);
+    let group = byKey.get(key);
+    if (!group) {
+      group = { key, events: [] };
+      byKey.set(key, group);
+      order.push(group);
+    }
+    group.events.push(d);
+  }
+  return order;
+}
 
 // quarantine=true renders the Quarantine page: the same table, but listing
 // quarantined denials, with Restore instead of Fix/Quarantine.
@@ -25,7 +55,8 @@ export function Denials({ quarantine = false }: { quarantine?: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [suggesting, setSuggesting] = useState<string | null>(null);
   const [suggested, setSuggested] = useState<Set<string>>(new Set());
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [busyGroup, setBusyGroup] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [reloadTick, setReloadTick] = useState(0);
   const autoTick = useAutoRefresh(5000);
   const lastQuery = useRef("");
@@ -43,27 +74,39 @@ export function Denials({ quarantine = false }: { quarantine?: boolean }) {
       .catch(() => {});
   }, [reloadTick, autoTick]);
 
-  const runAction = async (d: AvcEventHit, action: () => Promise<unknown>) => {
-    setBusyId(d.id);
+  const groups = useMemo(() => groupEvents(events), [events]);
+
+  const toggleExpanded = (key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const runGroupAction = async (key: string, evs: AvcEventHit[], action: (d: AvcEventHit) => Promise<unknown>) => {
+    setBusyGroup(key);
     try {
-      await action();
+      await Promise.all(evs.map(action));
       setReloadTick((n) => n + 1);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setBusyId(null);
+      setBusyGroup(null);
     }
   };
 
-  const remove = (d: AvcEventHit) => {
-    if (!window.confirm(t("denials.confirmDelete"))) return;
-    runAction(d, () => api.deleteDenial(d));
+  const removeGroup = (group: DenialGroup) => {
+    if (!window.confirm(t("denials.confirmDelete", { count: group.events.length }))) return;
+    runGroupAction(group.key, group.events, (d) => api.deleteDenial(d));
   };
 
-  const requestFix = async (id: string, d: AvcEventHit) => {
+  const requestFix = async (group: DenialGroup) => {
+    const d = group.events[0];
     if (!window.confirm(t("denials.confirmFix"))) return;
-    setSuggesting(id);
+    setSuggesting(group.key);
     try {
       await api.suggestModuleForDenial({
         agentId: d.agent_id,
@@ -72,7 +115,7 @@ export function Denials({ quarantine = false }: { quarantine?: boolean }) {
         tclass: d.tclass,
         rawLine: d.raw_line,
       });
-      setSuggested((prev) => new Set(prev).add(id));
+      setSuggested((prev) => new Set(prev).add(group.key));
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -196,82 +239,128 @@ export function Denials({ quarantine = false }: { quarantine?: boolean }) {
             </tr>
           </thead>
           <tbody>
-            {events.map((d) => (
-              <tr key={d.id}>
-                <td style={{ fontSize: 12, color: "var(--color-neutral-500)", whiteSpace: "nowrap" }}>
-                  {new Date(d.timestamp).toLocaleString(locale)}
-                </td>
-                <td style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>
-                  <Link to={`/agents/${d.agent_id}`}>{agentsByID.get(d.agent_id)?.hostname || d.agent_id}</Link>
-                </td>
-                <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, maxWidth: 280, wordBreak: "break-word" }}>
-                  <div>
-                    {d.scontext} → {d.tcontext}
-                  </div>
-                  <div style={{ fontFamily: "var(--font-body, inherit)", fontSize: 11, color: "var(--color-neutral-500)", marginTop: 2 }}>
-                    {explainDenial(d, locale)}
-                  </div>
-                </td>
-                <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--color-neutral-400)" }}>
-                  {d.tclass} · {d.perms.join(",")}
-                </td>
-                <td style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>{d.comm}</td>
-                <td style={{ fontSize: 12.5, color: "var(--color-neutral-400)", maxWidth: 300, wordBreak: "break-word" }}>
-                  {d.path}
-                </td>
-                <td style={{ textAlign: "right" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, flexWrap: "wrap" }}>
-                  {quarantine ? (
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      disabled={busyId === d.id}
-                      onClick={() => runAction(d, () => api.restoreDenial(d))}
-                    >
-                      {t("denials.restore")}
-                    </button>
-                  ) : (
-                    <>
-                      {suggested.has(d.id) ? (
-                        <Link to="/suggestions" className="tag tag-accent">
-                          {t("denials.fixRequested")}
-                        </Link>
-                      ) : (
+            {groups.map((group) => {
+              const d = group.events[0];
+              const isOpen = expanded.has(group.key);
+              const busy = busyGroup === group.key;
+              return (
+                <Fragment key={group.key}>
+                  <tr>
+                    <td style={{ fontSize: 12, color: "var(--color-neutral-500)", whiteSpace: "nowrap" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {group.events.length > 1 && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ padding: "1px 6px", fontSize: 11 }}
+                            onClick={() => toggleExpanded(group.key)}
+                            title={t("denials.occurrenceCount", { count: group.events.length })}
+                          >
+                            {isOpen ? "▾" : "▸"} {t("denials.occurrenceCount", { count: group.events.length })}
+                          </button>
+                        )}
+                        <span>{new Date(d.timestamp).toLocaleString(locale)}</span>
+                      </div>
+                    </td>
+                    <td style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>
+                      <Link to={`/agents/${d.agent_id}`}>{agentsByID.get(d.agent_id)?.hostname || d.agent_id}</Link>
+                    </td>
+                    <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, maxWidth: 280, wordBreak: "break-word" }}>
+                      <div>
+                        {d.scontext} → {d.tcontext}
+                      </div>
+                      <div style={{ fontFamily: "var(--font-body, inherit)", fontSize: 11, color: "var(--color-neutral-500)", marginTop: 2 }}>
+                        {explainDenial(d, locale)}
+                      </div>
+                    </td>
+                    <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--color-neutral-400)" }}>
+                      {d.tclass} · {d.perms.join(",")}
+                    </td>
+                    <td style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>{d.comm}</td>
+                    <td style={{ fontSize: 12.5, color: "var(--color-neutral-400)", maxWidth: 300, wordBreak: "break-word" }}>
+                      {d.path}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, flexWrap: "wrap" }}>
+                      {quarantine ? (
                         <button
                           type="button"
-                          className="btn btn-ghost"
-                          disabled={suggesting === d.id}
-                          onClick={() => requestFix(d.id, d)}
+                          className="btn btn-secondary"
+                          disabled={busy}
+                          onClick={() => runGroupAction(group.key, group.events, (e) => api.restoreDenial(e))}
                         >
-                          {suggesting === d.id ? "…" : t("denials.fixButton")}
+                          {busy ? "…" : t("denials.restore")}
                         </button>
+                      ) : (
+                        <>
+                          {suggested.has(group.key) ? (
+                            <Link to="/suggestions" className="tag tag-accent">
+                              {t("denials.fixRequested")}
+                            </Link>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              disabled={suggesting === group.key}
+                              onClick={() => requestFix(group)}
+                            >
+                              {suggesting === group.key ? "…" : t("denials.fixButton")}
+                            </button>
+                          )}
+                          <CollectDomainButton
+                            agentId={d.agent_id}
+                            domain={typeFromContext(d.scontext)}
+                            host={agentsByID.get(d.agent_id)?.hostname || d.agent_id}
+                            disabledReason={
+                              activeCollections.has(`${d.agent_id}|${typeFromContext(d.scontext)}`) ? t("collect.alreadyRunning") : undefined
+                            }
+                            onStarted={() => setReloadTick((n) => n + 1)}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            disabled={busy}
+                            onClick={() => runGroupAction(group.key, group.events, (e) => api.quarantineDenial(e))}
+                          >
+                            {busy ? "…" : t("denials.quarantine")}
+                          </button>
+                        </>
                       )}
-                      <CollectDomainButton
-                        agentId={d.agent_id}
-                        domain={typeFromContext(d.scontext)}
-                        host={agentsByID.get(d.agent_id)?.hostname || d.agent_id}
-                        disabledReason={
-                          activeCollections.has(`${d.agent_id}|${typeFromContext(d.scontext)}`) ? t("collect.alreadyRunning") : undefined
-                        }
-                        onStarted={() => setReloadTick((n) => n + 1)}
-                      />
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        disabled={busyId === d.id}
-                        onClick={() => runAction(d, () => api.quarantineDenial(d))}
-                      >
-                        {t("denials.quarantine")}
+                      <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => removeGroup(group)}>
+                        {busy ? "…" : t("denials.delete")}
                       </button>
-                    </>
+                      </div>
+                    </td>
+                  </tr>
+                  {isOpen && group.events.length > 1 && (
+                    <tr>
+                      <td colSpan={7} style={{ padding: 0, background: "var(--color-sunken)" }}>
+                        <div style={{ maxHeight: 180, overflowY: "auto", padding: "6px 11.2px", display: "flex", flexDirection: "column", gap: 4 }}>
+                          {group.events.map((e) => (
+                            <div
+                              key={e.id}
+                              style={{
+                                display: "flex",
+                                gap: 11.2,
+                                fontSize: 11.5,
+                                color: "var(--color-neutral-500)",
+                                flexWrap: "wrap",
+                                borderBottom: "1px solid var(--color-divider)",
+                                paddingBottom: 4,
+                              }}
+                            >
+                              <span style={{ whiteSpace: "nowrap" }}>{new Date(e.timestamp).toLocaleString(locale)}</span>
+                              <span style={{ fontFamily: "var(--font-mono)" }}>{e.comm}</span>
+                              <span style={{ wordBreak: "break-word", flex: 1 }}>{e.path}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
                   )}
-                  <button type="button" className="btn btn-ghost" disabled={busyId === d.id} onClick={() => remove(d)}>
-                    {t("denials.delete")}
-                  </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                </Fragment>
+              );
+            })}
             {events.length === 0 && !loading && (
               <tr>
                 <td colSpan={7} style={{ color: "var(--color-neutral-500)" }}>
