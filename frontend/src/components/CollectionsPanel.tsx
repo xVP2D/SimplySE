@@ -45,7 +45,7 @@ function CollectionRow({
         <span style={{ color: "var(--color-neutral-500)" }}>{t("collect.linesCollected", { count: c.lines_count })}</span>
       )}
       {c.status === "done" && c.suggestion_id && (
-        <Link to="/suggestions" className="tag tag-accent">
+        <Link to={`/suggestions?id=${c.suggestion_id}`} className="tag tag-accent">
           {t("collect.viewSuggestion")}
         </Link>
       )}

@@ -25,6 +25,12 @@ export function Suggestions() {
   const { t, locale } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const status = searchParams.get("status") ?? "pending";
+  // Set by a deep link (e.g. "Voir la suggestion" from the Collections
+  // page), which knows a suggestion's id but not its status — the id may
+  // point at a suggestion that isn't "pending" (failed, approved,
+  // rejected...), so it's fetched directly instead of relying on the
+  // status filter below to happen to include it.
+  const focusId = searchParams.get("id");
 
   const [offset, setOffset] = useState(0);
   const [modules, setModules] = useState<SuggestedModule[]>([]);
@@ -36,10 +42,36 @@ export function Suggestions() {
   const [detail, setDetail] = useState<SuggestedModule | null>(null);
   const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [focused, setFocused] = useState<SuggestedModule | null>(null);
+  const [focusError, setFocusError] = useState<string | null>(null);
 
   useEffect(() => {
     api.listAgents().then(setAgents).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!focusId) {
+      setFocused(null);
+      setFocusError(null);
+      return;
+    }
+    api
+      .getSuggestedModule(focusId)
+      .then((m) => {
+        setFocused(m);
+        setSelectedAgents(new Set([m.agent_id]));
+        setFocusError(null);
+      })
+      .catch((err) => setFocusError((err as Error).message));
+  }, [focusId]);
+
+  const clearFocus = () => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("id");
+      return next;
+    });
+  };
 
   useEffect(() => {
     setOffset(0);
@@ -111,6 +143,7 @@ export function Suggestions() {
       await api.approveSuggestedModule(id, Array.from(selectedAgents));
       setExpanded(null);
       setDetail(null);
+      if (id === focusId) clearFocus();
       load();
     } catch (err) {
       setError((err as Error).message);
@@ -126,6 +159,7 @@ export function Suggestions() {
       await api.rejectSuggestedModule(id);
       setExpanded(null);
       setDetail(null);
+      if (id === focusId) clearFocus();
       load();
     } catch (err) {
       setError((err as Error).message);
@@ -140,6 +174,101 @@ export function Suggestions() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 11.2 }}>
       <p style={{ margin: 0, fontSize: 12, color: "var(--color-neutral-500)" }}>{t("suggestions.explainer")}</p>
+
+      {focusId && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8.4,
+            padding: 14,
+            borderRadius: 8,
+            background: "var(--color-surface)",
+            boxShadow: "var(--shadow-sm)",
+            border: "1px solid var(--color-accent)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 11.2 }}>
+            <button type="button" className="btn btn-ghost" onClick={clearFocus}>
+              ← {t("suggestions.backToList")}
+            </button>
+            {focused && (
+              <>
+                <span className={statusTagClass(focused.status)}>{t(`suggestions.status.${focused.status}`)}</span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{focused.module_name}</span>
+                <Link to={`/agents/${focused.agent_id}`} style={{ fontSize: 12 }}>
+                  {focused.agent_id}
+                </Link>
+              </>
+            )}
+          </div>
+
+          {focusError && <p style={{ margin: 0, fontSize: 12.5, color: "var(--color-danger)" }}>{focusError}</p>}
+
+          {focused && (
+            <>
+              <span style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>
+                {focused.scontext} → {focused.tcontext} ({focused.tclass})
+              </span>
+              {focused.status === "failed" && (
+                <p style={{ margin: 0, fontSize: 12.5, color: "var(--color-danger)" }}>{focused.error_message}</p>
+              )}
+              {focused.te_text && (
+                <pre
+                  style={{
+                    margin: 0,
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 12,
+                    color: "var(--color-neutral-300)",
+                    background: "var(--color-sunken)",
+                    padding: 11.2,
+                    borderRadius: 6,
+                    maxHeight: 300,
+                    overflow: "auto",
+                    whiteSpace: "pre",
+                  }}
+                >
+                  {focused.te_text}
+                </pre>
+              )}
+              {focused.status === "pending" && (
+                <>
+                  <span style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>{t("suggestions.pickAgents")}</span>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8.4 }}>
+                    {agents.map((a) => (
+                      <label key={a.id} style={{ display: "flex", alignItems: "center", gap: 4.2, fontSize: 12.5 }}>
+                        <input type="checkbox" checked={selectedAgents.has(a.id)} onChange={() => toggleAgent(a.id)} />
+                        {a.hostname || a.id}
+                      </label>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 8.4 }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={busy || selectedAgents.size === 0}
+                      onClick={() => approve(focused.id)}
+                    >
+                      {t("suggestions.approveAndDeploy")}
+                    </button>
+                    <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => reject(focused.id)}>
+                      {t("suggestions.reject")}
+                    </button>
+                  </div>
+                </>
+              )}
+              {(focused.status === "approved" || focused.status === "rejected") && (
+                <span style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>
+                  {t("suggestions.reviewedMeta", {
+                    date: focused.reviewed_at ? new Date(focused.reviewed_at).toLocaleString(locale) : "",
+                    by: focused.reviewed_by,
+                  })}
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       <div
         style={{

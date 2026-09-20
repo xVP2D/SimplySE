@@ -200,7 +200,7 @@ export function Collections() {
               </button>
             )}
             {c.status === "done" && c.suggestion_id && (
-              <Link to="/suggestions" className="tag tag-accent">
+              <Link to={`/suggestions?id=${c.suggestion_id}`} className="tag tag-accent">
                 {t("collect.viewSuggestion")}
               </Link>
             )}
