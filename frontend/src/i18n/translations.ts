@@ -291,9 +291,6 @@ const en: Dict = {
       scatterAgent: "Machine",
     },
   },
-  brand: {
-    subtitle: "Fleet control",
-  },
   common: {
     loading: "Loading…",
     save: "Save",
@@ -896,9 +893,6 @@ const fr: Dict = {
       scatterAgent: "Machine",
     },
   },
-  brand: {
-    subtitle: "Fleet control",
-  },
   common: {
     loading: "Chargement…",
     save: "Enregistrer",
@@ -1500,9 +1494,6 @@ const es: Dict = {
       hexbin: "Hexbin",
       scatterAgent: "Máquina",
     },
-  },
-  brand: {
-    subtitle: "Fleet control",
   },
   common: {
     loading: "Cargando…",

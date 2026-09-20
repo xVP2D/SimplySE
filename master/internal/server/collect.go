@@ -109,20 +109,6 @@ type Collector struct {
 
 func collectionKey(agentID, domain string) string { return agentID + "\x00" + domain }
 
-// Suppresses reports whether denials from this source context are being
-// collected right now on this agent — the automatic per-permission
-// suggestions are paused for them, since the run produces one suggestion for
-// everything instead.
-func (c *Collector) Suppresses(agentID, scontext string) bool {
-	if c == nil {
-		return false
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	_, on := c.active[collectionKey(agentID, DomainOfContext(scontext))]
-	return on
-}
-
 func (c *Collector) setActive(list []postgres.Collection) {
 	next := make(map[string]struct{}, len(list))
 	for _, col := range list {

@@ -218,38 +218,3 @@ type TopSignature struct {
 	Agents int    `json:"agents"`
 }
 
-func (e *Engine) TopSignatures(limit int) []TopSignature {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	out := make([]TopSignature, 0, len(e.stats))
-	for _, s := range e.stats {
-		perms := make([]string, 0, len(s.Perms))
-		for p := range s.Perms {
-			perms = append(perms, p)
-		}
-		sort.Strings(perms)
-		out = append(out, TopSignature{
-			Pair:   fmt.Sprintf("%s -> %s", s.SContext, s.TContext),
-			Class:  s.TClass,
-			Perms:  strings.Join(perms, ","),
-			Count:  s.Count,
-			Agents: len(s.Agents),
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out
-}
-
-func (e *Engine) TotalCount() int {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	total := 0
-	for _, s := range e.stats {
-		total += s.Count
-	}
-	return total
-}

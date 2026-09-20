@@ -216,10 +216,6 @@ type NewCommand struct {
 // ErrRevertInProgress: an undo of that command is already pending/sent.
 var ErrRevertInProgress = errors.New("an undo of this command is already in progress")
 
-func (s *Store) CreateCommand(ctx context.Context, agentID string, ruleID *string, cmdType, payloadJSON string) (Command, error) {
-	return s.CreateCommandWith(ctx, NewCommand{AgentID: agentID, RuleID: ruleID, Type: cmdType, PayloadJSON: payloadJSON})
-}
-
 func (s *Store) CreateCommandWith(ctx context.Context, n NewCommand) (Command, error) {
 	c := Command{AgentID: n.AgentID, RuleID: n.RuleID, Type: n.Type, PayloadJSON: n.PayloadJSON,
 		UndoJSON: n.UndoJSON, RevertsCommandID: n.RevertsCommandID}
